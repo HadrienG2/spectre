@@ -1,0 +1,16 @@
+[package]
+name = "spectre"
+description = "Real-time spectrum analyzer and spectrogram plotter"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+env_logger = "0.9"
+jack = "0.7"
+log = "0.4"
+realfft = "2.0"
+structopt = "0.3"
+triple_buffer = "5.0"
