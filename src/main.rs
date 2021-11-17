@@ -2,15 +2,29 @@ use anyhow::Result;
 use jack::{AudioIn, Control, Frames, NotificationHandler, Port, ProcessHandler, ProcessScope};
 use log::{debug, error, info, warn};
 use realfft::{num_complex::Complex, RealFftPlanner, RealToComplex};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use rt_history::RTHistory;
+use std::{
+    panic::{catch_unwind, AssertUnwindSafe, UnwindSafe},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 use structopt::StructOpt;
 use triple_buffer::TripleBuffer;
 
 /// Remove DC offsets before computing Fourier transform
 const REMOVE_DC: bool = true;
+
+fn handle_panics(f: impl UnwindSafe + FnOnce() -> Control) -> Control {
+    match catch_unwind(f) {
+        Ok(c) => c,
+        Err(_e) => {
+            error!("Panic occurred in JACK thread, aborting...");
+            Control::Quit
+        }
+    }
+}
 
 // TODO: Use CLI options here instead of consts, for anything that we may
 //       want to change dynamically.
@@ -33,16 +47,18 @@ struct NotificationState {
 
 impl NotificationHandler for NotificationState {
     fn sample_rate(&mut self, _: &jack::Client, srate: Frames) -> Control {
-        if self.sample_rate != srate {
-            // FIXME: Instead of bombing, rerun bits of initialization that depends
-            //        on the sample rate, like FFT buffer allocation.
-            //        Should only be implemented once the code is rather mature and
-            //        we know well what must be done here.
-            eprintln!("Sample rate changes are not supported yet!");
-            Control::Quit
-        } else {
-            Control::Continue
-        }
+        handle_panics(|| {
+            if self.sample_rate != srate {
+                // FIXME: Instead of bombing, rerun bits of initialization that depends
+                //        on the sample rate, like FFT buffer allocation.
+                //        Should only be implemented once the code is rather mature and
+                //        we know well what must be done here.
+                eprintln!("Sample rate changes are not supported yet!");
+                Control::Quit
+            } else {
+                Control::Continue
+            }
+        })
     }
 }
 
@@ -90,64 +106,69 @@ struct ProcessState {
 
 impl ProcessHandler for ProcessState {
     fn process(&mut self, _: &jack::Client, process_scope: &ProcessScope) -> Control {
-        // Collect new audio data from JACK into our FFT input ring buffer
-        let new_data = self.input_port.as_slice(process_scope);
-        let (new_points, old_points) = self.last_points.split_at_mut(self.last_point_idx);
-        for (src, target) in new_data
-            .iter()
-            .zip(old_points.iter_mut().chain(new_points.iter_mut()))
-        {
-            *target = *src;
-        }
-        self.last_point_idx = (self.last_point_idx + new_data.len()) % self.last_points.len();
-
-        // Compute a new FFT if it's time to do so
-        self.curr_period += 1;
-        if self.curr_period >= self.fft_period {
-            // Linearize recent signal history
+        // AssertUnwindSafe seems reasonable here because JACK will not call us
+        // back if Control::Quit is returned and the state is not accessible
+        // after the thread has exited.
+        handle_panics(AssertUnwindSafe(|| {
+            // Collect new audio data from JACK into our FFT input ring buffer
+            let new_data = self.input_port.as_slice(process_scope);
             let (new_points, old_points) = self.last_points.split_at_mut(self.last_point_idx);
-            let (old_target, new_target) = self.fft_input.split_at_mut(old_points.len());
-            old_target.copy_from_slice(old_points);
-            new_target.copy_from_slice(new_points);
-
-            // Remove DC offset
-            if REMOVE_DC {
-                let average = self.fft_input.iter().sum::<f32>() / self.fft_input.len() as f32;
-                self.fft_input.iter_mut().for_each(|elem| *elem -= average);
+            for (src, target) in new_data
+                .iter()
+                .zip(old_points.iter_mut().chain(new_points.iter_mut()))
+            {
+                *target = *src;
             }
+            self.last_point_idx = (self.last_point_idx + new_data.len()) % self.last_points.len();
 
-            // Compute FFT
-            let result = self.fft.process_with_scratch(
-                &mut self.fft_input[..],
-                &mut self.fft_output[..],
-                &mut self.fft_scratch[..],
-            );
-            if let Err(err) = result {
-                error!("Failed to compute FFT: {}", err);
-                return Control::Quit;
-            }
+            // Compute a new FFT if it's time to do so
+            self.curr_period += 1;
+            if self.curr_period >= self.fft_period {
+                // Linearize recent signal history
+                let (new_points, old_points) = self.last_points.split_at_mut(self.last_point_idx);
+                let (old_target, new_target) = self.fft_input.split_at_mut(old_points.len());
+                old_target.copy_from_slice(old_points);
+                new_target.copy_from_slice(new_points);
 
-            // Normalize amplitudes, convert to dBm, and send the result out
-            let amps = self.fft_amps_in.input_buffer();
-            let norm_sqr = 1.0 / self.fft_input.len() as f32;
-            for (coeff, amp) in self.fft_output.iter().zip(amps.iter_mut()) {
-                *amp = 10.0 * (coeff.norm_sqr() * norm_sqr).log10();
-            }
-            let overwrite = self.fft_amps_in.publish();
+                // Remove DC offset
+                if REMOVE_DC {
+                    let average = self.fft_input.iter().sum::<f32>() / self.fft_input.len() as f32;
+                    self.fft_input.iter_mut().for_each(|elem| *elem -= average);
+                }
 
-            // The triple buffer tells us if we did overwrite an unread FFT, and
-            // we use that to probe the downstream readout rate and adjust our
-            // own FFT computation rate accordingly.
-            if overwrite && self.display_ready.load(Ordering::Relaxed) {
-                // FIXME: Make sure this only triggers after client started
-                //        receiving data, via an atomic.
-                self.fft_period += 1;
-            } else {
-                self.fft_period = self.fft_period.saturating_sub(1);
+                // Compute FFT
+                let result = self.fft.process_with_scratch(
+                    &mut self.fft_input[..],
+                    &mut self.fft_output[..],
+                    &mut self.fft_scratch[..],
+                );
+                if let Err(err) = result {
+                    error!("Failed to compute FFT: {}", err);
+                    return Control::Quit;
+                }
+
+                // Normalize amplitudes, convert to dBm, and send the result out
+                let amps = self.fft_amps_in.input_buffer();
+                let norm_sqr = 1.0 / self.fft_input.len() as f32;
+                for (coeff, amp) in self.fft_output.iter().zip(amps.iter_mut()) {
+                    *amp = 10.0 * (coeff.norm_sqr() * norm_sqr).log10();
+                }
+                let overwrite = self.fft_amps_in.publish();
+
+                // The triple buffer tells us if we did overwrite an unread FFT, and
+                // we use that to probe the downstream readout rate and adjust our
+                // own FFT computation rate accordingly.
+                if overwrite && self.display_ready.load(Ordering::Relaxed) {
+                    // FIXME: Make sure this only triggers after client started
+                    //        receiving data, via an atomic.
+                    self.fft_period += 1;
+                } else {
+                    self.fft_period = self.fft_period.saturating_sub(1);
+                }
+                self.curr_period = 0;
             }
-            self.curr_period = 0;
-        }
-        Control::Continue
+            Control::Continue
+        }))
     }
 
     fn buffer_size(&mut self, _: &jack::Client, size: Frames) -> Control {
