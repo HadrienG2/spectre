@@ -59,12 +59,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
-name = "cache-padded"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "631ae5198c9be5e753e5cc215e1bd73c2b466a3565173db433f52bb9d3e66dba"
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -322,7 +316,6 @@ dependencies = [
  "realfft",
  "rt-history",
  "structopt",
- "triple_buffer",
 ]
 
 [[package]]
@@ -418,15 +411,6 @@ checksum = "95f9c900aa98b6ea43aee227fd680550cdec726526aab8ac801549eadb25e39f"
 dependencies = [
  "num-integer",
  "strength_reduce",
-]
-
-[[package]]
-name = "triple_buffer"
-version = "5.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "803966e5a8397a70d3d8111afa1597ba8381346d7de4720e9f539471d371a1a3"
-dependencies = [
- "cache-padded",
 ]
 
 [[package]]
