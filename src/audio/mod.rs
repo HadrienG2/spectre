@@ -2,33 +2,45 @@ mod errors;
 
 use self::errors::{ErrorInput, ErrorOutput};
 use jack::{
-    AsyncClient, AudioIn, Control, Frames, NotificationHandler, Port, ProcessHandler, ProcessScope,
+    AsyncClient, AudioIn, Client, Control, Frames, NotificationHandler, Port, ProcessHandler,
+    ProcessScope,
 };
 use rt_history::{Overrun, RTHistory};
 use std::panic::AssertUnwindSafe;
 
-// Expose audio thread errors so client can read and display them
+// Expose audio thread errors so the main thread can process them
 pub use errors::AudioError;
 
-/// Handle to an audio recording pipeline
-pub struct AudioRecording {
-    /// Underlying connection to the JACK audio server
-    _jack_client: AsyncClient<NotificationState, ProcessState>,
-
-    /// Mechanism to query errors from the audio threads
-    error_output: ErrorOutput,
-
-    /// Mechanism to read the latest audio history from the audio threads
-    hist_output: rt_history::Output<f32>,
-}
+/// Handle to a prepared audio setup that is not recording data yet
+pub struct AudioSetup(Client);
 //
-impl AudioRecording {
-    /// Start recording audio into a history buffer of user-specified length
-    pub fn start(jack_client: jack::Client, history_len: usize) -> crate::Result<Self> {
+impl AudioSetup {
+    /// Set up the audio stack
+    pub fn new() -> crate::Result<Self> {
+        // Set up a JACK client
+        let (jack_client, status) =
+            jack::Client::new(env!("CARGO_PKG_NAME"), jack::ClientOptions::NO_START_SERVER)?;
+        log::debug!("Got jack client with status: {:?}", status);
+        Ok(Self(jack_client))
+    }
+
+    /// Query audio sampling rate
+    pub fn sample_rate(&self) -> usize {
+        self.0.sample_rate()
+    }
+
+    /// Granularity at which history data will be written by the audio thread
+    pub fn buffer_size(&self) -> usize {
+        self.0.buffer_size() as usize
+    }
+
+    /// Start recording audio data into a history buffer of a certain length
+    pub fn start_recording(self, history_len: usize) -> crate::Result<AudioRecording> {
         // Allocate history buffer
         let (hist_input, hist_output) = RTHistory::new(history_len).split();
 
         // Setup audio input port
+        let jack_client = self.0;
         let input_port = jack_client.register_port("input", AudioIn)?;
 
         // Prepare to handle audio thread errors
@@ -53,7 +65,21 @@ impl AudioRecording {
             hist_output,
         })
     }
+}
 
+/// Handle to an active audio recording pipeline
+pub struct AudioRecording {
+    /// Underlying connection to the JACK audio server
+    _jack_client: AsyncClient<NotificationState, ProcessState>,
+
+    /// Mechanism to query errors from the audio threads
+    error_output: ErrorOutput,
+
+    /// Mechanism to read the latest audio history from the audio threads
+    hist_output: rt_history::Output<f32>,
+}
+//
+impl AudioRecording {
     /// Read latest audio history after checking for audio thread errors
     pub fn read_history(
         &mut self,

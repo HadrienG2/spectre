@@ -1,6 +1,6 @@
 mod audio;
 
-use self::audio::AudioRecording;
+use self::audio::AudioSetup;
 use log::{debug, error, info, warn};
 use realfft::RealFftPlanner;
 use rt_history::Overrun;
@@ -30,10 +30,8 @@ fn main() -> Result<()> {
     let opt = CliOpts::from_args();
     debug!("Got CLI options {:?}", opt);
 
-    // Set up JACK client and port
-    let (jack_client, status) =
-        jack::Client::new(env!("CARGO_PKG_NAME"), jack::ClientOptions::NO_START_SERVER)?;
-    debug!("Got jack client with status: {:?}", status);
+    // Set up the audio stack
+    let audio = AudioSetup::new()?;
 
     // Translate the desired frequency resolution into an FFT length
     //
@@ -46,15 +44,14 @@ fn main() -> Result<()> {
     // back that Nmin to a number of points 2xNmin, and we round that to the
     // next power of two.
     //
-    let sample_rate = jack_client.sample_rate();
     let fft_len = 2_usize.pow(
-        (sample_rate as f32 / opt.frequency_resolution)
+        (audio.sample_rate() as f32 / opt.frequency_resolution)
             .log2()
             .ceil() as _,
     );
     info!(
         "At a sampling rate of {} Hz, achieving the requested frequency resolution of {} Hz requires a {}-points FFT",
-        jack_client.sample_rate(),
+        audio.sample_rate(),
         opt.frequency_resolution,
         fft_len
     );
@@ -62,8 +59,8 @@ fn main() -> Result<()> {
     // Start recording audio after making sure that the audio thread can write
     // two periods before triggering an overrun (which should always be true,
     // since we're computing long FFTs).
-    assert!((jack_client.buffer_size() as usize) <= fft_len / 2);
-    let mut recording = AudioRecording::start(jack_client, 2 * fft_len)?;
+    assert!((audio.buffer_size() as usize) <= fft_len / 2);
+    let mut recording = audio.start_recording(2 * fft_len)?;
 
     // Prepare for the FFT computation
     let mut fft_planner = RealFftPlanner::<f32>::new();
@@ -126,7 +123,7 @@ fn main() -> Result<()> {
         )
         .expect("Failed to compute FFT");
 
-        // Normalize amplitudes, convert to dBm, and send the result out
+        // Normalize amplitudes, convert to dBFS, and send the result out
         let norm_sqr = 1.0 / fft_input.len() as f32;
         for (coeff, amp) in fft_output.iter().zip(fft_amps.iter_mut()) {
             *amp = 10.0 * (coeff.norm_sqr() * norm_sqr).log10();
