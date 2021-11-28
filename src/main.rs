@@ -46,7 +46,7 @@ impl NotificationHandler for NotificationState {
                 //        on the sample rate, like FFT buffer allocation.
                 //        Should only be implemented once the code is rather mature and
                 //        we know well what must be done here.
-                eprintln!("Sample rate changes are not supported yet!");
+                error!("Sample rate changes are not supported yet!");
                 Control::Quit
             } else {
                 Control::Continue
@@ -56,13 +56,6 @@ impl NotificationHandler for NotificationState {
 }
 
 struct ProcessState {
-    /// Last observed buffer size
-    ///
-    /// We don't support buffer size changes yet, but if the code doesn't change
-    /// too much, we may be able to.
-    ///
-    buffer_size: Frames,
-
     /// Port which input data is coming from
     input_port: Port<AudioIn>,
 
@@ -84,24 +77,27 @@ impl ProcessHandler for ProcessState {
     }
 
     fn buffer_size(&mut self, _: &jack::Client, size: Frames) -> Control {
-        if self.buffer_size != size {
-            // FIXME: Instead of bombing, rerun bits of initialization that depend
-            //        on the buffer size, like latency sanity checks.
-            //        Should only be implemented once the code is rather mature and
-            //        we know well what must be done here.
-            eprintln!("Buffer size changes are not supported yet!");
-            Control::Quit
-        } else {
-            Control::Continue
-        }
+        // FIXME: Implement support for reallocating self.output_hist storage,
+        //        this should be easy-ish to do since the buffer_size callback
+        //        is allowed to do RT-unsafe things like allocating memory and
+        //        the main thread has no RT-safety requirements.
+        handle_panics(AssertUnwindSafe(|| {
+            if size as usize > self.output_hist.capacity() {
+                error!("Must reallocate ring buffer and that is not supported yet!");
+                Control::Quit
+            } else {
+                if size as usize > self.output_hist.capacity() / 4 {
+                    warn!("Should reallocate ring buffer, overruns are likely to occur!");
+                }
+                Control::Continue
+            }
+        }))
     }
 }
 
 fn main() -> Result<()> {
     // Set up logging
     env_logger::init();
-    jack::set_error_callback(|msg| error!("JACK said: {}", msg));
-    jack::set_info_callback(|msg| info!("JACK said: {}", msg));
 
     // Decode CLI arguments
     let opt = Opt::from_args();
@@ -137,13 +133,14 @@ fn main() -> Result<()> {
         fft_len
     );
 
-    // Set up a communication channel with the audio thread
-    let (hist_input, hist_output) = RTHistory::new(3 * fft_len).split();
+    // Set up a communication channel with the audio thread, ensuring that the
+    // audio thread can write two periods before triggering an overrun.
+    assert!((jack_client.buffer_size() as usize) <= fft_len / 2);
+    let (hist_input, hist_output) = RTHistory::new(2 * fft_len).split();
 
     // Start recording audio
     let notification_handler = NotificationState { sample_rate };
     let process_handler = ProcessState {
-        buffer_size: jack_client.buffer_size() as _,
         input_port,
         output_hist: hist_input,
     };
@@ -204,7 +201,7 @@ fn main() -> Result<()> {
         }
 
         // TODO: Display the FFT
-        // eprintln!("Current FFT is {:?}", fft_amps);
+        // println!("Current FFT is {:?}", fft_amps);
     }
 
     Ok(())
