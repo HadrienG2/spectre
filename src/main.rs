@@ -104,7 +104,7 @@ fn main() -> Result<()> {
             // The audio threads have crashed, report their errors and die
             mut audio_error @ Err(_) => {
                 while let Err(error) = audio_error {
-                    error!("Audio thread reported an error: {:?}", error);
+                    error!("Audio thread error: {:?}", error);
                     audio_error = recording.read_history(&mut fft_input[..]);
                 }
                 error!("Audio thread exited due to errors, time to die...");

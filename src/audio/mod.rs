@@ -4,7 +4,6 @@ use self::errors::{ErrorInput, ErrorOutput};
 use jack::{
     AsyncClient, AudioIn, Control, Frames, NotificationHandler, Port, ProcessHandler, ProcessScope,
 };
-use log::warn;
 use rt_history::{Overrun, RTHistory};
 use std::panic::AssertUnwindSafe;
 
@@ -123,6 +122,8 @@ impl ProcessHandler for ProcessState {
         }))
     }
 
+    // By special exemption, this callback is allowed to do allocation-heavy
+    // stuff like emitting logs, and we're going to leverage that
     fn buffer_size(&mut self, _: &jack::Client, size: Frames) -> Control {
         // AssertUnwindSafe seems reasonable for the same reason as above.
         self.error_input.handle_panics(AssertUnwindSafe(|| {
@@ -130,14 +131,27 @@ impl ProcessHandler for ProcessState {
             //        this should be easy-ish to do since the buffer_size callback
             //        is allowed to do RT-unsafe things like allocating memory and
             //        the main thread has no RT-safety requirements.
+            use log::{error, info, warn};
             if size as usize > self.output_hist.capacity() {
+                error!(
+                    "New JACK buffer size {} is above history capacity {}. \
+                     Must reallocate history buffer!",
+                    size,
+                    self.output_hist.capacity()
+                );
                 self.error_input
                     .notify_error(AudioError::MustReallocateHistory);
                 Control::Quit
             } else {
                 if size as usize > self.output_hist.capacity() / 4 {
-                    // Can emit a warning since this callback does not need to be RT-safe
-                    warn!("Should reallocate ring buffer, overruns are likely to occur!");
+                    warn!(
+                        "New JACK buffer size {} is more than 1/4 of history capacity {}. \
+                         Overruns are likely to occur. Should reallocate history buffer!",
+                        size,
+                        self.output_hist.capacity()
+                    );
+                } else {
+                    info!("Switching to new supported JACK buffer size {}", size);
                 }
                 Control::Continue
             }
