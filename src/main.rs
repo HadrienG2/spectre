@@ -1,5 +1,6 @@
 mod audio;
 mod fourier;
+pub(crate) mod simd;
 
 use crate::{audio::AudioSetup, fourier::FourierTransform};
 use log::{debug, error, warn};
