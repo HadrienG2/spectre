@@ -1,7 +1,6 @@
 //! Vectorized or auto-vectorizable computations
 
 use std::{
-    iter::Sum,
     mem,
     ops::{Add, AddAssign},
 };
@@ -42,27 +41,14 @@ impl AddAssign for SimdF32 {
         *self = *self + rhs;
     }
 }
-//
-impl Sum for SimdF32 {
-    fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
-        if let Some(vec) = iter.next() {
-            iter.fold(vec, |acc, x| acc + x)
-        } else {
-            Self::default()
-        }
-    }
-}
-
-/// Number of hardware SIMD registers
-const NUM_SIMD_REGISTERS: usize = 16;
 
 /// Sum an array of f32s in a vectorizable manner
 pub fn sum_f32(input: &[f32]) -> f32 {
+    // Accumulation concurrency (TODO: tune through benchmarking)
+    const CONCURRENCY: usize = 1 << 3;
+
     // Reinterprete input as a slice of aligned SIMD vectors + some extra floats
     let (peel, vectors, tail) = unsafe { input.align_to::<SimdF32>() };
-
-    // Determine at which concurrency SIMD accumulation is best performed
-    const CONCURRENCY: usize = NUM_SIMD_REGISTERS / 2;
 
     // Chunk the aligned SIMD data accordingly
     let chunks = vectors.chunks_exact(CONCURRENCY);
@@ -77,7 +63,14 @@ pub fn sum_f32(input: &[f32]) -> f32 {
     }
 
     // Merge the SIMD accumulators into one
-    let mut accumulator = accumulators.iter().copied().sum::<SimdF32>();
+    let mut stride = CONCURRENCY / 2;
+    while stride > 0 {
+        for i in 0..stride {
+            accumulators[i] += accumulators[i + stride];
+        }
+        stride /= 2;
+    }
+    let mut accumulator = accumulators[0];
 
     // Perform non-concurrent SIMD accumulation with remaining data
     for &vector in remainder {
