@@ -1,17 +1,14 @@
 mod audio;
+mod fourier;
 
-use self::audio::AudioSetup;
-use log::{debug, error, info, warn};
-use realfft::RealFftPlanner;
+use crate::{audio::AudioSetup, fourier::FourierTransform};
+use log::{debug, error, warn};
 use rt_history::Overrun;
 use structopt::StructOpt;
 
 /// Default Result type used throughout this app whenever bubbling errors up
 /// seems to be the only sensible option.
 pub use anyhow::Result;
-
-/// Remove DC offsets before computing Fourier transform
-const REMOVE_DC: bool = true;
 
 // TODO: Use CLI options here instead of consts, for anything that we may
 //       want to change dynamically.
@@ -33,51 +30,27 @@ fn main() -> Result<()> {
     // Set up the audio stack
     let audio = AudioSetup::new()?;
 
-    // Translate the desired frequency resolution into an FFT length
-    //
-    // Given 2xN input data point, a real-fft produces N+1 frequency bins
-    // ranging from 0 frequency to sampling_rate/2. So bins spacing df is
-    // sampling_rate/(2*N) Hz.
-    //
-    // By inverting this relation, we get that the smallest N needed to achieve
-    // a bin spacing smaller than df is Nmin = sampling_rate / (2 * df). We turn
-    // back that Nmin to a number of points 2xNmin, and we round that to the
-    // next power of two.
-    //
-    let fft_len = 2_usize.pow(
-        (audio.sample_rate() as f32 / opt.frequency_resolution)
-            .log2()
-            .ceil() as _,
-    );
-    info!(
-        "At a sampling rate of {} Hz, achieving the requested frequency resolution of {} Hz requires a {}-points FFT",
-        audio.sample_rate(),
-        opt.frequency_resolution,
-        fft_len
-    );
+    // Set up the Fourier transform
+    let mut fourier = FourierTransform::new(opt.frequency_resolution, audio.sample_rate());
 
-    // Start recording audio after making sure that the audio thread can write
-    // two periods before triggering an overrun (which should always be true,
-    // since we're computing long FFTs).
-    assert!((audio.buffer_size() as usize) <= fft_len / 2);
-    let mut recording = audio.start_recording(2 * fft_len)?;
-
-    // Prepare for the FFT computation
-    let mut fft_planner = RealFftPlanner::<f32>::new();
-    let fft = fft_planner.plan_fft_forward(fft_len);
-    let mut fft_input = fft.make_input_vec().into_boxed_slice();
-    let mut fft_output = fft.make_output_vec().into_boxed_slice();
-    let mut fft_scratch = fft.make_scratch_vec().into_boxed_slice();
-    let mut fft_amps = vec![0.0; fft_output.len()].into_boxed_slice();
+    // Start recording audio, keeping enough history that the audio thread can
+    // write two full periods before triggering an FFT input readout overrun.
+    let history_len = if audio.buffer_size() <= fourier.input().len() / 2 {
+        2 * fourier.input().len()
+    } else {
+        4 * audio.buffer_size()
+    };
+    let mut recording = audio.start_recording(history_len)?;
 
     // Start computing some FFTs
     let mut last_clock = 0;
     for _ in 0..1000 {
-        // DEBUG: Simulate vertical synchronization
+        // FIXME: Simulate vertical synchronization
         std::thread::sleep(std::time::Duration::from_millis(7));
 
-        // Read latest FFT history, handle xruns and audio thread errors
-        last_clock = match recording.read_history(&mut fft_input[..]) {
+        // Read latest audio history, handle xruns and audio thread errors
+        // TODO: Report audio errors visually in the final display
+        last_clock = match recording.read_history(fourier.input()) {
             // Successfully read latest FFT history with a certain timestamp
             Ok(Ok(clock)) => {
                 if clock == last_clock {
@@ -102,32 +75,15 @@ fn main() -> Result<()> {
             mut audio_error @ Err(_) => {
                 while let Err(error) = audio_error {
                     error!("Audio thread error: {:?}", error);
-                    audio_error = recording.read_history(&mut fft_input[..]);
+                    audio_error = recording.read_history(fourier.input());
                 }
                 error!("Audio thread exited due to errors, time to die...");
                 std::process::exit(1);
             }
         };
 
-        // Remove DC offset
-        if REMOVE_DC {
-            let average = fft_input.iter().sum::<f32>() / fft_len as f32;
-            fft_input.iter_mut().for_each(|elem| *elem -= average);
-        }
-
-        // Compute FFT
-        fft.process_with_scratch(
-            &mut fft_input[..],
-            &mut fft_output[..],
-            &mut fft_scratch[..],
-        )
-        .expect("Failed to compute FFT");
-
-        // Normalize amplitudes, convert to dBFS, and send the result out
-        let norm_sqr = 1.0 / fft_input.len() as f32;
-        for (coeff, amp) in fft_output.iter().zip(fft_amps.iter_mut()) {
-            *amp = 10.0 * (coeff.norm_sqr() * norm_sqr).log10();
-        }
+        // Compute the Fourier transform
+        let _fft_amps = fourier.compute();
 
         // TODO: Display the FFT
         // println!("Current FFT is {:?}", fft_amps);
