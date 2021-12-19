@@ -1,3 +1,5 @@
+//! Lock-free error handling for the audio thread
+
 use jack::Control;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;

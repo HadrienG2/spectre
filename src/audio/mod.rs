@@ -1,3 +1,5 @@
+//! Interaction with the audio stack
+
 mod errors;
 
 use self::errors::{ErrorInput, ErrorOutput};
