@@ -18,9 +18,11 @@ struct SimdF32([f32; 16 / mem::size_of::<f32>()]);
 struct SimdF32([f32; 32 / mem::size_of::<f32>()]);
 //
 impl SimdF32 {
-    /// Sum vector elements (TODO: leverage HADD)
-    pub fn sum(self) -> f32 {
-        self.0.into_iter().sum::<f32>()
+    /// Sum vector elements
+    pub fn sum(&self) -> f32 {
+        // NOTE: I tried smarter algorithms, but it would bust sum_f32 codegen.
+        //       This is best left to explicit SIMD code, once possible.
+        self.0.iter().sum::<f32>()
     }
 }
 //
@@ -44,13 +46,24 @@ impl AddAssign for SimdF32 {
 
 /// Sum an array of f32s in a vectorizable manner
 pub fn sum_f32(input: &[f32]) -> f32 {
-    // Accumulation concurrency (TODO: tune through benchmarking)
-    const CONCURRENCY: usize = 1 << 3;
+    // Number of SIMD accumulation streams to perform in parallel
+    //
+    // This parameter should be tuned through benchmarking. Intuition says:
+    // - It should be at least 2 (since current-gen CPUs have two SIMD adders)
+    // - Values higher than 2 may yield better ILP performance
+    // - Setting it too high will result in averse effects like pessimizing the
+    //   small input case too much or compiler failing to unroll the loops.
+    //
+    const CONCURRENCY: usize = 1 << 1;
 
     // Reinterprete input as a slice of aligned SIMD vectors + some extra floats
     let (peel, vectors, tail) = unsafe { input.align_to::<SimdF32>() };
 
-    // Chunk the aligned SIMD data accordingly
+    // Accumulate peel data
+    let sum = |slice: &[f32]| slice.iter().sum::<f32>();
+    let peel_sum = sum(peel);
+
+    // Chunk the aligned SIMD data according to desired concurrency
     let chunks = vectors.chunks_exact(CONCURRENCY);
     let remainder = chunks.remainder();
 
@@ -72,7 +85,7 @@ pub fn sum_f32(input: &[f32]) -> f32 {
     }
     let mut accumulator = accumulators[0];
 
-    // Perform non-concurrent SIMD accumulation with remaining data
+    // Perform non-concurrent SIMD accumulation with remaining SIMD data
     for &vector in remainder {
         accumulator += vector;
     }
@@ -80,7 +93,9 @@ pub fn sum_f32(input: &[f32]) -> f32 {
     // Reduce the SIMD vector into a scalar
     let simd_sum = accumulator.sum();
 
-    // Finalize the sum
-    let sum = |slice: &[f32]| slice.iter().sum::<f32>();
-    sum(peel) + simd_sum + sum(tail)
+    // Accumulate tail data
+    let tail_sum = sum(tail);
+
+    // Deduce the final result
+    peel_sum + simd_sum + tail_sum
 }
