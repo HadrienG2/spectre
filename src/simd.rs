@@ -44,18 +44,31 @@ impl AddAssign for SimdF32 {
     }
 }
 
-/// Sum an array of f32s in a vectorizable manner
+/// Sum an array of f32s
 pub fn sum_f32(input: &[f32]) -> f32 {
-    // Number of SIMD accumulation streams to perform in parallel
-    //
-    // This parameter should be tuned through benchmarking. Intuition says:
-    // - It should be at least 2 (since current-gen CPUs have two SIMD adders)
-    // - Values higher than 2 may yield better ILP performance
-    // - Setting it too high will result in averse effects like pessimizing the
-    //   small input case too much or compiler failing to unroll the loops.
-    //
-    const CONCURRENCY: usize = 1 << 1;
+    if cfg!(target_feature = "avx") {
+        if input.len() < 16 {
+            input.iter().sum::<f32>()
+        } else if input.len() < 256 {
+            sum_f32_impl::<1>(input)
+        } else {
+            sum_f32_impl::<2>(input)
+        }
+    } else {
+        if input.len() < 32 {
+            input.iter().sum::<f32>()
+        } else if input.len() < 256 {
+            sum_f32_impl::<1>(input)
+        } else if input.len() < 1024 {
+            sum_f32_impl::<2>(input)
+        } else {
+            sum_f32_impl::<4>(input)
+        }
+    }
+}
 
+/// Implementation of sum_f32 with tunable (power-of-2) SIMD op concurrency
+pub fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
     // Reinterprete input as a slice of aligned SIMD vectors + some extra floats
     let (peel, vectors, tail) = unsafe { input.align_to::<SimdF32>() };
 
