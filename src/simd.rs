@@ -68,7 +68,7 @@ pub fn sum_f32(input: &[f32]) -> f32 {
 }
 
 /// Implementation of sum_f32 with tunable (power-of-2) SIMD op concurrency
-pub fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
+fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
     // Reinterprete input as a slice of aligned SIMD vectors + some extra floats
     let (peel, vectors, tail) = unsafe { input.align_to::<SimdF32>() };
 
