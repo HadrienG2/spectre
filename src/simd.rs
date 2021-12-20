@@ -44,32 +44,40 @@ impl AddAssign for SimdF32 {
     }
 }
 
-/// Sum an array of f32s
-pub fn sum_f32(input: &[f32]) -> f32 {
+/// Sum an array of f32s, optimizing for speed
+///
+/// This algorithm is quite fast, but not resilient to accumulation error and
+/// catastrophic cancelation, so it only provides a rough result (~0.1% relative
+/// precision reliably observed on small batches of 24-bit audio data). More
+/// precision can be obtained if needed by using either 2x more CPU time (f64
+/// accumulators), O(N) storage (pairwise summation, sorted input...), or a
+/// combination of both.
+///
+pub fn sum_f32_fast(input: &[f32]) -> f32 {
     // NOTE: Algorithm selection tuned through benchmarking on a Zen 2 CPU
     if cfg!(target_feature = "avx") {
         if input.len() < 16 {
             input.iter().sum::<f32>()
         } else if input.len() < 256 {
-            sum_f32_impl::<1>(input)
+            sum_f32_fast_impl::<1>(input)
         } else {
-            sum_f32_impl::<2>(input)
+            sum_f32_fast_impl::<2>(input)
         }
     } else {
         if input.len() < 32 {
             input.iter().sum::<f32>()
         } else if input.len() < 256 {
-            sum_f32_impl::<1>(input)
+            sum_f32_fast_impl::<1>(input)
         } else if input.len() < 1024 {
-            sum_f32_impl::<2>(input)
+            sum_f32_fast_impl::<2>(input)
         } else {
-            sum_f32_impl::<4>(input)
+            sum_f32_fast_impl::<4>(input)
         }
     }
 }
 
 /// Implementation of sum_f32 with tunable (power-of-2) SIMD op concurrency
-fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
+fn sum_f32_fast_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
     // Reinterprete input as aligned SIMD vectors + some extra floats.
     //
     // This is trivially safe since SimdF32 is just an aligned batch of f32 and
@@ -122,4 +130,58 @@ fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
 
     // Deduce the final result
     peel_sum + simd_sum + tail_sum
+}
+
+#[cfg(test)]
+mod tests {
+    use more_asserts::*;
+    use quickcheck::TestResult;
+    use quickcheck_macros::quickcheck;
+
+    #[quickcheck]
+    fn sum_f32_fast(input: Vec<i32>) -> TestResult {
+        // This function is meant to work on audio data with 24-bit resolution
+        let input = input
+            .into_iter()
+            .map(|x| x % (1 << 24))
+            .map(|x| x as f32 / (1 << 24) as f32)
+            .collect::<Box<[_]>>();
+
+        // Compute input sum using a precision-optimized algorithm
+        let next_pow2_len = input.len().next_power_of_two();
+        let mut sum_acc = input
+            .iter()
+            .map(|&x| x as f64)
+            .chain(std::iter::repeat(0.0))
+            .take(next_pow2_len)
+            .collect::<Box<[_]>>();
+        let mut stride = sum_acc.len() / 2;
+        while stride > 0 {
+            for i in 0..stride {
+                sum_acc[i] += sum_acc[i + stride];
+            }
+            stride /= 2;
+        }
+        let expected = sum_acc[0] as f32;
+
+        // Compare our sum implementation with this expectation
+        let actual = super::sum_f32_fast(&input);
+        if expected == 0.0 {
+            assert_eq!(actual, expected);
+        } else {
+            let tolerance = 1e-3;
+            assert_le!(
+                (actual - expected).abs(),
+                tolerance * expected.abs(),
+                "Given input {:?} of length {}, actual result {} is not within \
+                 relative tolerance {} of expectation {}",
+                input,
+                input.len(),
+                actual,
+                tolerance,
+                expected
+            );
+        }
+        TestResult::passed()
+    }
 }
