@@ -124,7 +124,7 @@
   message d'erreur et refuse de démarrer le programme.
     * Validation: Ajout d'un thread console qui affiche la FFT toutes les
       secondes + soumission de divers signaux test via amsynth.
-* Milestone 3: Thread graphique (RT!) qui fait un plot de cette dernière FFT en
+* [ ] Milestone 3: Thread graphique (RT!) qui fait un plot de cette dernière FFT en
   date à chaque événement de refresh écran via des lignes antialiasées en jaune
   sur fond noir. Dans un premier temps, on affiche tous les bins en échelle
   linéaire, sans légende, avec une échelle verticale hardcodée en const, et on
@@ -134,13 +134,13 @@
   graphique.
     * Validation: Comme avant, mais avec la visu graphique plutôt qu'un thread
       console supplémentaire.
-* Milestone 4: Passage à une échelle horizontale log contrôlé par une constante
+* [ ] Milestone 4: Passage à une échelle horizontale log contrôlé par une constante
   (à la base hardcodée via une const), puis ajout de légendes horizontales et
   verticales et d'une grille de pas en pixel raisonnable. Restriction des bins
   affichés à 20Hz-20kHz.
     * Validation: Comme avant, mais en plus c'est facile de vérifier la
       calibration.
-* Milestone 5: Remplacement du triple buffer à l'interface DSP->graphique par un
+* [ ] Milestone 5: Remplacement du triple buffer à l'interface DSP->graphique par un
   ring buffer pouvant conserver un historique de FFTs. Signalement des
   overruns dans le thread console + compteur non modulaire 64-bit permettant au
   thread graphique de les détecter aussi. Récupération de l'historique dans le
@@ -153,29 +153,29 @@
       histogramme: Blanc? Gaussien? Essai de différents algorithmes de filtrage:
       médiane glissante, moyenne glissante, autres filtres... Sélection de
       l'algorithme de filtrage adapté.
-* Milestone 6: Intégration de la réduction de bruit au thread DSP, qui conserve
+* [ ] Milestone 6: Intégration de la réduction de bruit au thread DSP, qui conserve
   maintenant lui-même un historique des N (hardcodé en const) dernières FFTs
   qu'il a calculé et envoie des amplitudes filtrées au thread graphique.
     * Validation: Visualisation des FFTs filtrées, ajustement de la taille de
       fenêtres et test de différents algos de filtrages si besoin.
-* Milestone 7: Ajout d'un plot spectrogramme au thread graphique. D'abord en
+* [ ] Milestone 7: Ajout d'un plot spectrogramme au thread graphique. D'abord en
   échelle horizontale linéaire, avec une palette noir -> blanc, et avec un
   rafraîchissement intégral à chaque cycle. Approche à base de quad rendu par un
   fragment shader selon texture correspondant à l'historique d'amplitude FFT.
     * Validation: Test sur signaux audio synthétiques d'amsynth.
-* Milestone 8: Meilleure palette de couleur (utiliser palette `INFERNO` tirée
+* [ ] Milestone 8: Meilleure palette de couleur (utiliser palette `INFERNO` tirée
   de matplotlib via la crate `palette`), rafraîchissement restreint aux
   nouvelles données, et support de l'échelle log dans le spectrogramme via un
   fragment shader plus intelligent.
     * Validation: Test sur signaux audio synthétiques d'amsynth.
-* Milestone 9: Ajout de fenêtrage et normalisation associée dans le thread DSP,
+* [ ] Milestone 9: Ajout de fenêtrage et normalisation associée dans le thread DSP,
   faire un peu de biblio sur wikipedia pour savoir quelles fenêtres tester.
     * Validation: Test sur signaux audio synthétiques, puis réels.
-* Milestone 10: Ajout de décimation dans le thread DSP, compositing des
+* [ ] Milestone 10: Ajout de décimation dans le thread DSP, compositing des
   différentes décimations en une amplitude unique soumise au thread graphique,
   du point de vue de qui rien ne devrait changer.
     * Validation: Test sur signaux audio synthétiques.
-* Milestone 11: Essayer d'aller souplement d'une décimation à la suivante en
+* [ ] Milestone 11: Essayer d'aller souplement d'une décimation à la suivante en
   faisant une moyenne pondérée (ex: supposons que le bin de fréquence plus
   élevée soit sur une fenêtre N=64 et celui d'après soit sur une fenêtre N=128,
   alors du dernier point absolu M au dernier point de la première fenêtre M-64
@@ -183,14 +183,14 @@
   proche de k=M-64).
     * Validation: Enregistrer des signaux réels transitoires (ex: chocs),
       vérifier qu'il n'y a plus de discontinuités marquées dans le spectrogramme.
-* Milestone 12: Supporter le redimensionnement de la fenêtre sans perdre le
+* [ ] Milestone 12: Supporter le redimensionnement de la fenêtre sans perdre le
   caractère RT du thread graphique: les nouvelles allocations de mémoire vidéo
   sont faires par un thread séparé et remplacées à la volée par un algo qui est
   lock-free pour le thread graphique. Attention à la libération mémoire qui
   doit attendre que le thread graphique ait fini (mais je crois que wgpu le
   gère en standard).
     * Validation: Test sur signaux audio synthétiques, redim. la fenêtre.
-* Milestone 13: Progressivement rendre des paramètres const ajustables à la
+* [ ] Milestone 13: Progressivement rendre des paramètres const ajustables à la
   volée par des raccourcis clavier, sans perdre la RT-safety (ex: les
   allocations mémoire sont faites par un thread séparé et remplacées à la volée
   par un algo qui est lock-free pour les threads RT). Au fur et à mesure, créer
@@ -198,14 +198,14 @@
   indique les paramètres actuels.
     * Validation: Test sur signaux audio synthétiques en appuyant sur des
       raccourcis clavier.
-* Milestone 14: Ajouter un détecteur de pics au thread DSP. Soit la réduction de
+* [ ] Milestone 14: Ajouter un détecteur de pics au thread DSP. Soit la réduction de
   bruit utilisée rend ça facile, soit il faudra potentiellement appliquer une
   réduction de bruit plus agressive en interne pour la détection des pics, ou
   découpler la réduction de bruit du spectre instantané de celle du
   spectrogramme pour éviter de rendre le spectrogramme trop flou au niveau
   temporel.
     * Validation: Vérifier que les pics sont bien détectés de façon fiable.
-* Milestone 15: Permettre un affichage en phones, moyennant une calibration
+* [ ] Milestone 15: Permettre un affichage en phones, moyennant une calibration
   comprenant une mesure de sweep à la position d'écoute pour avoir la courbe EQ
   de la pièce en régime établi + une calibration basée sur la mesure du volume
   sonore d'un signal 0dB/1kHz par un dBmètre. Utiliser les courbes isosoniques
@@ -213,6 +213,6 @@
     * Validation: Confirmer que lors d'un sweep en fréquence de signal
       synthétique également envoyé sur les enceintes, la variation de
       l'intensité de couleur correspond à la variation de niveau sonore perçu.
-* Milestone ???: Ping Carl Reinke, l'auteur de spectroid, sur LinkedIn pour lui
+* [ ] Milestone ???: Ping Carl Reinke, l'auteur de spectroid, sur LinkedIn pour lui
   faire part de ma réalisation.
 * 
