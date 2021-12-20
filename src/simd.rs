@@ -46,6 +46,7 @@ impl AddAssign for SimdF32 {
 
 /// Sum an array of f32s
 pub fn sum_f32(input: &[f32]) -> f32 {
+    // NOTE: Algorithm selection tuned through benchmarking on a Zen 2 CPU
     if cfg!(target_feature = "avx") {
         if input.len() < 16 {
             input.iter().sum::<f32>()
@@ -69,7 +70,11 @@ pub fn sum_f32(input: &[f32]) -> f32 {
 
 /// Implementation of sum_f32 with tunable (power-of-2) SIMD op concurrency
 fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
-    // Reinterprete input as a slice of aligned SIMD vectors + some extra floats
+    // Reinterprete input as aligned SIMD vectors + some extra floats.
+    //
+    // This is trivially safe since SimdF32 is just an aligned batch of f32 and
+    // we're enforcing the alignment requirement through align_to.
+    //
     let (peel, vectors, tail) = unsafe { input.align_to::<SimdF32>() };
 
     // Accumulate peel data
@@ -99,11 +104,17 @@ fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
     let mut accumulator = accumulators[0];
 
     // Perform non-concurrent SIMD accumulation with remaining SIMD data
+    //
+    // NOTE: Alternating between merging and progressively less concurrent
+    //       accumulation would be slightly smarter, but it currently busts the
+    //       compiler ability to keep accumulators resident in SIMD registers,
+    //       and that's definitely not a good tradeoff...
+    //
     for &vector in remainder {
         accumulator += vector;
     }
 
-    // Reduce the SIMD vector into a scalar
+    // Reduce the SIMD accumulator into a scalar
     let simd_sum = accumulator.sum();
 
     // Accumulate tail data
