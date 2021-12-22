@@ -12,21 +12,24 @@ use structopt::StructOpt;
 /// seems to be the only sensible option.
 pub use anyhow::Result;
 
-// TODO: Use CLI options here instead of consts, for anything that we may
-//       want to change dynamically.
+// Command-line parameters
 #[derive(Debug, StructOpt)]
 struct CliOpts {
     /// Minimum monitored frequency in Hz
     #[structopt(long, default_value = "20.0")]
-    min_frequency: f32,
+    min_freq: f32,
 
     /// Maximum monitored frequency in Hz
     #[structopt(long, default_value = "20000.0")]
-    max_frequency: f32,
+    max_freq: f32,
 
     /// Minimal frequency resolution in Hz
+    ///
+    /// This is the minimal FFT bin spacing, actual frequency resolution will
+    /// depend on the choice of window function.
+    ///
     #[structopt(long, default_value = "1.0")]
-    frequency_resolution: f32,
+    freq_res: f32,
 
     /// Use a linear frequency scale
     ///
@@ -34,7 +37,7 @@ struct CliOpts {
     /// audition, but linear scales may be better for specific applications.
     ///
     #[structopt(long)]
-    linear_scale: bool,
+    lin_freqs: bool,
 
     /// Amplitude scale in dBFS
     ///
@@ -42,7 +45,7 @@ struct CliOpts {
     /// rendered, typically you will want to set this at your "noise floor".
     ///
     #[structopt(long, default_value = "96")]
-    amplitude_scale: f32,
+    amp_scale: f32,
 }
 
 fn main() -> Result<()> {
@@ -52,29 +55,29 @@ fn main() -> Result<()> {
     // Decode CLI arguments
     let opts = CliOpts::from_args();
     debug!("Got CLI options {:?}", opts);
-    if !opts.min_frequency.is_finite() || opts.min_frequency < 0.0 {
+    if !opts.min_freq.is_finite() || opts.min_freq < 0.0 {
         panic!("Please enter a sensible minimum frequency");
     }
-    if !opts.max_frequency.is_finite() || opts.max_frequency <= opts.min_frequency {
+    if !opts.max_freq.is_finite() || opts.max_freq <= opts.min_freq {
         panic!("Please enter a sensible maximum frequency");
     }
-    if !opts.frequency_resolution.is_finite() || opts.frequency_resolution <= 0.0 {
+    if !opts.freq_res.is_finite() || opts.freq_res <= 0.0 {
         panic!("Please enter a sensible frequency resolution");
     }
-    if !opts.amplitude_scale.is_finite() {
+    if !opts.amp_scale.is_finite() {
         panic!("Please enter a sensible amplitude scale");
     }
-    let amplitude_scale = opts.amplitude_scale.abs();
+    let amplitude_scale = opts.amp_scale.abs();
 
     // Set up the audio stack
     let audio = AudioSetup::new()?;
     let sample_rate = audio.sample_rate();
-    if opts.max_frequency > (sample_rate / 2) as f32 {
+    if opts.max_freq > (sample_rate / 2) as f32 {
         panic!("Requested max frequency can't be probed at current sampling rate");
     }
 
     // Set up the Fourier transform
-    let mut fourier = FourierTransform::new(opts.frequency_resolution, sample_rate);
+    let mut fourier = FourierTransform::new(opts.freq_res, sample_rate);
 
     // Start recording audio, keeping enough history that the audio thread can
     // write two full periods before triggering an FFT input readout overrun.
@@ -93,9 +96,9 @@ fn main() -> Result<()> {
         fourier.output_len(),
         sample_rate,
         NUM_OUTPUT_BINS,
-        opts.min_frequency,
-        opts.max_frequency,
-        !opts.linear_scale,
+        opts.min_freq,
+        opts.max_freq,
+        !opts.lin_freqs,
     );
 
     // Start computing some FFTs
