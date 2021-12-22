@@ -89,6 +89,7 @@ fn sum_f32_impl<const CONCURRENCY: usize>(input: &[f32]) -> f32 {
     }
 
     // Merge the SIMD accumulators into one
+    assert!(CONCURRENCY.is_power_of_two());
     let mut stride = CONCURRENCY / 2;
     while stride > 0 {
         for i in 0..stride {
