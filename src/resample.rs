@@ -30,7 +30,7 @@ fn integrate(f: &[f32], start: f32, end: f32) -> f32 {
     if before_end < after_start {
         // Integrating in the middle of a single input bin
         debug_assert_eq!(before_end, after_start - 1);
-        0.5 * (left_val + right_val) * (end_fract - start_fract)
+        0.5 * (left_val + right_val) * (end - start)
     } else {
         // Integrating across at least one bin boundary
         //
@@ -100,14 +100,12 @@ impl FourierResampler {
 
         // Find the list of bin borders corresponding to the resampled transform
         let bin_borders: Box<[_]> = if log_scale {
-            let bin_multiplier = (max_bin / min_bin).powf(1.0 / num_output_bins as f32);
             (0..=num_output_bins as i32)
-                .map(|b| min_bin * bin_multiplier.powi(b))
+                .map(|b| min_bin * (max_bin / min_bin).powf(b as f32 / num_output_bins as f32))
                 .collect()
         } else {
-            let bin_spacing = (max_bin - min_bin) / num_output_bins as f32;
             (0..=num_output_bins as i32)
-                .map(|b| min_bin + b as f32 * bin_spacing)
+                .map(|b| min_bin + b as f32 * (max_bin - min_bin) / num_output_bins as f32)
                 .collect()
         };
 
