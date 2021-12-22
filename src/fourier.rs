@@ -71,7 +71,7 @@ impl FourierTransform {
         &mut self.input[..]
     }
 
-    /// Compute the Fourier transform and return magnitudes in dBFS
+    /// Compute the Fourier transform and return coefficient magnitudes in dBFS
     pub fn compute(&mut self) -> &[f32] {
         // Remove DC offset if configured to do so
         if REMOVE_DC {
