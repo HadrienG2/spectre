@@ -1,8 +1,9 @@
 mod audio;
 mod fourier;
+mod resample;
 pub mod simd;
 
-use crate::{audio::AudioSetup, fourier::FourierTransform};
+use crate::{audio::AudioSetup, fourier::FourierTransform, resample::FourierResampler};
 use log::{debug, error, warn};
 use rt_history::Overrun;
 use structopt::StructOpt;
@@ -18,6 +19,10 @@ struct CliOpts {
     /// Minimal frequency resolution in Hz
     #[structopt(long, default_value = "1.0")]
     frequency_resolution: f32,
+
+    /// Use a linear scale (the default log scale better matches human audition)
+    #[structopt(long)]
+    linear_scale: bool,
 }
 
 fn main() -> Result<()> {
@@ -25,14 +30,15 @@ fn main() -> Result<()> {
     env_logger::init();
 
     // Decode CLI arguments
-    let opt = CliOpts::from_args();
-    debug!("Got CLI options {:?}", opt);
+    let opts = CliOpts::from_args();
+    debug!("Got CLI options {:?}", opts);
 
     // Set up the audio stack
     let audio = AudioSetup::new()?;
+    let sample_rate = audio.sample_rate();
 
     // Set up the Fourier transform
-    let mut fourier = FourierTransform::new(opt.frequency_resolution, audio.sample_rate());
+    let mut fourier = FourierTransform::new(opts.frequency_resolution, sample_rate);
 
     // Start recording audio, keeping enough history that the audio thread can
     // write two full periods before triggering an FFT input readout overrun.
@@ -43,11 +49,28 @@ fn main() -> Result<()> {
     };
     let mut recording = audio.start_recording(history_len)?;
 
+    // Prepare to resample the Fourier transform for display purposes
+    // FIXME: Replace all these hardcoded test parameters with real parameters
+    //        that can be tuned at runtime.
+    const NUM_OUTPUT_BINS: usize = 10;
+    let min_freq = 20.0;
+    let max_freq = 20_000.0;
+    let mut resampler = FourierResampler::new(
+        fourier.output_len(),
+        sample_rate,
+        NUM_OUTPUT_BINS,
+        min_freq,
+        max_freq,
+        !opts.linear_scale,
+    );
+
     // Start computing some FFTs
     let mut last_clock = 0;
     for _ in 0..1000 {
         // FIXME: Simulate vertical synchronization
-        std::thread::sleep(std::time::Duration::from_millis(7));
+        std::thread::sleep(
+            std::time::Duration::from_secs(1), /* std::time::Duration::from_millis(7) */
+        );
 
         // Read latest audio history, handle xruns and audio thread errors
         // TODO: Report audio errors visually in the final display
@@ -84,10 +107,14 @@ fn main() -> Result<()> {
         };
 
         // Compute the Fourier transform
-        let _fft_amps = fourier.compute();
+        let fft_amps = fourier.compute();
 
-        // TODO: Display the FFT
-        // println!("Current FFT is {:?}", fft_amps);
+        // Resample it to the desired number of output bins
+        let output_bins = resampler.resample(fft_amps);
+
+        // Display the resampled FFT bins
+        // FIXME: Move to a real GUI display
+        println!("FFT bins: {:?}", output_bins);
     }
 
     Ok(())

@@ -40,6 +40,8 @@ impl FourierTransform {
         // back that Nmin to a number of points 2xNmin, and we round that to the
         // next power of two.
         //
+        assert!(resolution > 0.0);
+        assert_ne!(sample_rate, 0);
         let fft_len = 2_usize.pow((sample_rate as f32 / resolution).log2().ceil() as _);
         info!(
             "At a sampling rate of {} Hz, achieving the requested frequency resolution of {} Hz requires a {}-points FFT",
@@ -69,6 +71,11 @@ impl FourierTransform {
     /// Access the input buffer
     pub fn input(&mut self) -> &mut [f32] {
         &mut self.input[..]
+    }
+
+    /// Query the output length
+    pub fn output_len(&self) -> usize {
+        self.output.len()
     }
 
     /// Compute the Fourier transform and return coefficient magnitudes in dBFS
