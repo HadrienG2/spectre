@@ -383,9 +383,9 @@ impl FourierTransform {
             // TODO: Right now, log10 computations are about 30% of the CPU
             //       consumption. This could be sped up, at the expense of
             //       losing precision, by using the floating-point exponent as
-            //       an (integral) approximation of the log2. Precision can be
-            //       improved by dividing by 2^N and applying this procedure
-            //       recursively.
+            //       an (integral) approximation of the log2. But that's only
+            //       3dB precision, which is very low. Maybe a bit of iterative
+            //       refinement could get us to 0.something at low-ish cost.
             *mag = 10.0 * (coeff.norm_sqr()).log10();
         }
         magnitude
