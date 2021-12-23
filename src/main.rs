@@ -26,8 +26,8 @@ struct CliOpts {
 
     /// Minimal frequency resolution in Hz
     ///
-    /// This is the minimal FFT bin spacing, actual frequency resolution will
-    /// depend on the choice of window function.
+    /// This is the minimal FFT bin spacing at 20Hz, actual frequency resolution
+    /// will be a bit more, depending on the choice of window function.
     ///
     #[structopt(long, default_value = "1.0")]
     freq_res: f32,
@@ -154,7 +154,7 @@ fn main() -> Result<()> {
 
         // Display the resampled FFT bins
         // FIXME: Move to a real GUI display, but maybe keep this one around
-        //        just for fun
+        //        just for fun and as an exercise in abstraction.
         const SPARKLINE: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
         print!("FFT: ");
         for &bin in output_bins {
