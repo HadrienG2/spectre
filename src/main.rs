@@ -4,9 +4,13 @@ mod resample;
 pub mod simd;
 
 use crate::{audio::AudioSetup, fourier::FourierTransform, resample::FourierResampler};
+use crossterm::{cursor, terminal, QueueableCommand};
 use log::{debug, error, warn};
 use rt_history::Overrun;
-use std::time::{Duration, Instant};
+use std::{
+    io::Write,
+    time::{Duration, Instant},
+};
 use structopt::StructOpt;
 
 /// Default Result type used throughout this app whenever bubbling errors up
@@ -89,14 +93,33 @@ fn main() -> Result<()> {
     };
     let mut recording = audio.start_recording(history_len)?;
 
+    // Initialize the terminal display
+    let (term_width, term_height) = terminal::size().unwrap_or((80, 25));
+    let (term_width, term_height): (usize, usize) = (term_width.into(), term_height.into());
+    let spectrum_height = term_height - 1;
+    let mut stdout = std::io::stdout();
+    stdout.queue(cursor::Hide)?;
+    stdout.queue(terminal::EnterAlternateScreen)?;
+    stdout.queue(terminal::DisableLineWrap)?;
+    ctrlc::set_handler(|| {
+        let mut stdout = std::io::stdout();
+        stdout.queue(cursor::Show).unwrap();
+        stdout.queue(terminal::LeaveAlternateScreen).unwrap();
+        stdout.queue(terminal::EnableLineWrap).unwrap();
+        stdout.flush().unwrap();
+        std::process::exit(0);
+    })?;
+    const SPARKLINE: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let mut spectrum = String::with_capacity(
+        term_width * term_height * SPARKLINE.iter().map(|c| c.len_utf8()).max().unwrap_or(1),
+    );
+    let row_height = amplitude_scale / spectrum_height as f32;
+
     // Prepare to resample the Fourier transform for display purposes
-    // FIXME: Replace all these hardcoded test parameters with real parameters
-    //        that can be tuned at runtime.
-    const NUM_OUTPUT_BINS: usize = 200; // FIXME: Should be provided by terminal display
     let mut resampler = FourierResampler::new(
         fourier.output_len(),
         sample_rate,
-        NUM_OUTPUT_BINS,
+        term_width,
         opts.min_freq,
         opts.max_freq,
         !opts.lin_freqs,
@@ -155,20 +178,27 @@ fn main() -> Result<()> {
         // Display the resampled FFT bins
         // FIXME: Move to a real GUI display, but maybe keep this one around
         //        just for fun and as an exercise in abstraction.
-        const SPARKLINE: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-        print!("FFT: ");
-        for &bin in output_bins {
-            let spark = if bin < -amplitude_scale {
-                SPARKLINE[0]
-            } else if bin > 0.0 {
-                SPARKLINE.last().unwrap().clone()
-            } else {
-                let normalized = bin / amplitude_scale + 1.0;
-                let idx = (normalized * (SPARKLINE.len() - 2) as f32) as usize + 1;
-                SPARKLINE[idx]
-            };
-            print!("{}", spark);
+        spectrum.clear();
+        for row in 0..spectrum_height {
+            let max_val = -(row as f32) * row_height;
+            let min_val = -(row as f32 + 1.0) * row_height;
+            for &bin in output_bins {
+                let spark = if bin < min_val {
+                    SPARKLINE[0]
+                } else if bin > max_val {
+                    SPARKLINE.last().unwrap().clone()
+                } else {
+                    let normalized = (bin - min_val) / row_height;
+                    let idx = (normalized * (SPARKLINE.len() - 2) as f32) as usize + 1;
+                    SPARKLINE[idx]
+                };
+                spectrum.push(spark);
+            }
+            spectrum.push('\n');
         }
-        println!();
+        stdout.queue(cursor::MoveTo(0, 0))?;
+        print!("{}", spectrum);
+        stdout.flush()?;
     }
+    // FIXME: Must bring back cursor when
 }
