@@ -56,11 +56,6 @@ impl CliDisplay {
         self.width.into()
     }
 
-    /// Report spectrum height in chars
-    fn spectrum_height(&self) -> u16 {
-        self.height - 1
-    }
-
     /// Wait for the previous submitted spectrum to be displayed
     pub fn wait_for_frame(&mut self) {
         // CLI APIs can't really do VSync, but we assume a max display rate of 144Hz
@@ -137,6 +132,11 @@ impl CliDisplay {
         )?;
         stdout.flush()?;
         Ok(())
+    }
+
+    /// Report spectrum height in chars
+    fn spectrum_height(&self) -> u16 {
+        self.height - 1
     }
 }
 //
