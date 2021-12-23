@@ -26,6 +26,12 @@ const REMOVE_DC: bool = true;
 //        and use those decimations. If so, must make sure to fill the end of
 //        merged_output with data from the last FFT.
 //
+//        Another path to think about is to be constant-Q in the middle of the
+//        log frequency scale (which is where most interesting things happen)
+//        and standard FFT on the sides. After all, specifying a frequency
+//        resolution at 20Hz and a time resolution at 20kHz does not specify
+//        where the transition between these two constraints should happen.
+//
 pub struct ApproxConstantQTransform {
     /// Radix-2 FFTs used to approximate the constant-Q transform, and frequency
     /// bin of the base (first) FFT on which each one is considered optimal.
