@@ -16,11 +16,17 @@ pub struct FourierTransform {
     /// Time series input
     input: Box<[f32]>,
 
+    /// Window to be applied to input data
+    window: Box<[f32]>,
+
     /// Scratch space
     scratch: Box<[Complex<f32>]>,
 
     /// Complex FFT output
     output: Box<[Complex<f32>]>,
+
+    /// Square norm factor by which the FFT squared magnitude should be multiplied
+    output_norm_sqr: f32,
 
     /// Complex FFT magnitude in dB
     magnitude: Box<[f32]>,
@@ -28,7 +34,7 @@ pub struct FourierTransform {
 //
 impl FourierTransform {
     /// Get ready to compute Fourier transforms with a certain frequency resolution (in Hz)
-    pub fn new(resolution: f32, sample_rate: usize) -> Self {
+    pub fn new(resolution: f32, sample_rate: usize, window: &str) -> Self {
         // Translate the desired frequency resolution into an FFT length
         //
         // Given 2xN input data point, a real-fft produces N+1 frequency bins
@@ -58,12 +64,54 @@ impl FourierTransform {
         let output = fft.make_output_vec().into_boxed_slice();
         let magnitude = vec![0.0; output.len()].into_boxed_slice();
 
+        // Prepare for input windowing and output normalization
+        let window: Box<[_]> = match window {
+            "rectangular" => std::iter::repeat(1.0).take(input.len()).collect(),
+            "triangular" => (0..input.len() / 2)
+                .chain((0..input.len() / 2).rev())
+                .map(|x| x as f32 / ((input.len() - 1) / 2) as f32)
+                .collect(),
+            "hann" => (0..input.len())
+                .map(|n| {
+                    (std::f32::consts::PI * n as f32 / (input.len() - 1) as f32)
+                        .sin()
+                        .powi(2)
+                })
+                .collect(),
+            "blackman" => (0..input.len())
+                .map(|n| {
+                    use std::f32::consts::TAU;
+                    let alpha = 0.16;
+                    let a0 = 0.5 * (1.0 - alpha);
+                    let a1 = 0.5;
+                    let a2 = 0.5 * alpha;
+                    let phase = TAU * n as f32 / input.len() as f32;
+                    a0 - a1 * (phase).cos() + a2 * (2.0 * phase).cos()
+                })
+                .collect(),
+            "nuttall" => (0..input.len())
+                .map(|n| {
+                    use std::f32::consts::TAU;
+                    let a0 = 0.355768;
+                    let a1 = 0.487396;
+                    let a2 = 0.144232;
+                    let a3 = 0.012604;
+                    let phase = TAU * n as f32 / input.len() as f32;
+                    a0 - a1 * (phase).cos() + a2 * (2.0 * phase).cos() - a3 * (3.0 * phase).cos()
+                })
+                .collect(),
+            _ => panic!("Window type {} is not supported", window),
+        };
+        let output_norm_sqr = 4.0 / simd::sum_f32(&window[..]).powi(2);
+
         // Return the state to the client
         Self {
             fft,
             input,
+            window,
             scratch,
             output,
+            output_norm_sqr,
             magnitude,
         }
     }
@@ -86,6 +134,11 @@ impl FourierTransform {
             self.input.iter_mut().for_each(|elem| *elem -= average);
         }
 
+        // Apply window function
+        for (x, &w) in self.input.iter_mut().zip(self.window.iter()) {
+            *x *= w;
+        }
+
         // Compute FFT
         self.fft
             .process_with_scratch(
@@ -96,12 +149,17 @@ impl FourierTransform {
             .expect("Failed to compute FFT");
 
         // Normalize magnitudes, convert to dBFS, and send the result out
-        let norm_sqr = 4.0 / (self.input.len() as f32).powi(2);
         for (coeff, mag) in self.output.iter().zip(self.magnitude.iter_mut()) {
             // NOTE: dBFS formula is 20*log10(|coeff| / (N/2)) but we avoid a
             //       bunch of square roots by noticing that by definition of the
             //       logarithm this is equal to 10*log10(|coeff|² / (N/2)²).
-            *mag = 10.0 * (coeff.norm_sqr() * norm_sqr).log10();
+            // TODO: Right now, log10 computations are about 30% of the CPU
+            //       consumption. This could be sped up, at the expense of
+            //       losing precision, by using the floating-point exponent as
+            //       an (integral) approximation of the log2. Precision can be
+            //       improved by dividing by 2^N and applying this procedure
+            //       recursively.
+            *mag = 10.0 * (coeff.norm_sqr() * self.output_norm_sqr).log10();
         }
         &self.magnitude[..]
     }

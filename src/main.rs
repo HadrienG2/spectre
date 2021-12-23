@@ -44,6 +44,26 @@ struct CliOpts {
     #[structopt(long)]
     lin_freqs: bool,
 
+    /// Window function to be applied
+    ///
+    /// "rectangular" has minimal central peak width (1 bin), but maximal
+    /// leakage (first sidelobe at -15dB, down to -40dB when 40 bins away).
+    ///
+    /// "triangular" has a central peak width of 1.3 bins, first sidelobes at
+    /// -30dB, down to -70dB when 40 bins away.
+    ///
+    /// "hann" has a central peak width of 1.5 bins, first sidelobes at -30dB,
+    /// down to -105dB when 40 bins away.
+    ///
+    /// "blackman" has a central peak width of 1.7 bins, first sidelobes at
+    /// -60dB, down to -115dB when 40 bins away.
+    ///
+    /// "nuttall" has a central peak width of 2.0 bins, first sidelobes at
+    /// -95dB, down to -130dB when 40 bins away.
+    ///
+    #[structopt(long, default_value = "rectangular")]
+    window: String,
+
     /// Amplitude scale in dBFS
     ///
     /// Signal amplitudes lower than this amount below 0dBFS will not be
@@ -82,7 +102,7 @@ fn main() -> Result<()> {
     }
 
     // Set up the Fourier transform
-    let mut fourier = FourierTransform::new(opts.freq_res, sample_rate);
+    let mut fourier = FourierTransform::new(opts.freq_res, sample_rate, &opts.window);
 
     // Start recording audio, keeping enough history that the audio thread can
     // write two full periods before triggering an FFT input readout overrun.
