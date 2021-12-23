@@ -26,10 +26,11 @@ criterion = "0.3"
 name = "my_benchmark"
 harness = false
 
-[profile.bench]
-opt-level = 3
-debug = 2
+[profile.release]
 codegen-units = 1
 # Not currently beneficial to performance
 # lto = "fat"
 # panic = "abort"
+
+[profile.bench]
+debug = 2
