@@ -1,16 +1,13 @@
 mod audio;
+mod display;
 mod fourier;
 mod resample;
 pub mod simd;
 
 use crate::{audio::AudioSetup, fourier::FourierTransform, resample::FourierResampler};
-use crossterm::{cursor, terminal, QueueableCommand};
 use log::{debug, error};
 use rt_history::Overrun;
-use std::{
-    io::Write,
-    time::{Duration, Instant},
-};
+use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
 /// Default Result type used throughout this app whenever bubbling errors up
@@ -92,7 +89,6 @@ fn main() -> Result<()> {
     if !opts.amp_scale.is_finite() {
         panic!("Please enter a sensible amplitude scale");
     }
-    let amplitude_scale = opts.amp_scale.abs();
 
     // Set up the audio stack
     let audio = AudioSetup::new()?;
@@ -111,56 +107,47 @@ fn main() -> Result<()> {
     } else {
         4 * audio.buffer_size()
     };
-    let mut recording = audio.start_recording(history_len)?;
+    let recording = audio.start_recording(history_len)?;
 
     // Initialize the terminal display
-    let (term_width, term_height) = terminal::size().unwrap_or((80, 25));
-    let (term_width, term_height): (usize, usize) = (term_width.into(), term_height.into());
-    let spectrum_height = term_height - 1;
-    let mut stdout = std::io::stdout();
-    stdout.queue(cursor::Hide)?;
-    stdout.queue(terminal::EnterAlternateScreen)?;
-    stdout.queue(terminal::DisableLineWrap)?;
-    let restore_terminal = || {
-        let mut stdout = std::io::stdout();
-        stdout.queue(cursor::Show).unwrap();
-        stdout.queue(terminal::LeaveAlternateScreen).unwrap();
-        stdout.queue(terminal::EnableLineWrap).unwrap();
-        stdout.flush().unwrap();
-    };
-    ctrlc::set_handler(move || {
-        restore_terminal();
-        // TODO: Cleanly shut down JACK client. This requires putting
-        //       "recording" someplace where the Ctrl+C handler thread can
-        //       reach it and move it away, and protecting it against
-        //       multi-threaded access. A Mutex<Option> should work.
-        std::process::exit(0);
-    })?;
-    const SPARKLINE: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let mut spectrum = String::with_capacity(
-        term_width * term_height * SPARKLINE.iter().map(|c| c.len_utf8()).max().unwrap_or(1),
-    );
-    let row_height = amplitude_scale / spectrum_height as f32;
+    let display = display::CliDisplay::new(opts.amp_scale.abs())?;
 
     // Prepare to resample the Fourier transform for display purposes
     let mut resampler = FourierResampler::new(
         fourier.output_len(),
         sample_rate,
-        term_width,
+        display.width(),
         opts.min_freq,
         opts.max_freq,
         !opts.lin_freqs,
     );
 
+    // Handle user shutdown requests (Ctrl+C)
+    let shared_state = Arc::new(Mutex::new(Some((recording, display))));
+    let shared_state_2 = shared_state.clone();
+    ctrlc::set_handler(move || {
+        // FIXME: This waits indefinitely...
+        let mut recording_and_display_lock = shared_state_2
+            .lock()
+            .expect("Mutex state shouldn't be corrupt");
+        let recording_and_display = recording_and_display_lock
+            .take()
+            .expect("Once Ctrl+C has taken the shared state, the process should exit");
+        std::mem::drop(recording_and_display);
+        std::process::exit(0);
+    })?;
+
     // Start computing some FFTs
     let mut last_clock = 0;
-    let mut last_refresh = Instant::now();
     loop {
-        // Simulate vertical synchronization
-        // FIXME: Extract to console backend
-        const REFRESH_PERIOD: Duration = Duration::from_millis(100);
-        std::thread::sleep(REFRESH_PERIOD.saturating_sub(last_refresh.elapsed()));
-        last_refresh = Instant::now();
+        // Access the shared state
+        // FIXME: ...because this hangs onto the lock too much
+        let mut recording_and_display_lock = shared_state
+            .lock()
+            .expect("Mutex state shouldn't be corrupt");
+        let (ref mut recording, ref mut display) = recording_and_display_lock
+            .as_mut()
+            .expect("Once Ctrl+C has taken the shared state, the process should exit");
 
         // Read latest audio history, handle xruns and audio thread errors
         let mut underrun = false;
@@ -185,7 +172,6 @@ fn main() -> Result<()> {
 
             // The audio threads have crashed, report their errors and die
             mut audio_error @ Err(_) => {
-                restore_terminal();
                 while let Err(error) = audio_error {
                     error!("Audio thread error: {:?}", error);
                     audio_error = recording.read_history(fourier.input());
@@ -206,49 +192,17 @@ fn main() -> Result<()> {
                 let output_bins = resampler.resample(fft_amps);
 
                 // Display the resampled FFT bins
-                // FIXME: Move to a real GUI display, but maybe keep this one around
-                //        just for fun and as an exercise in abstraction.
-                spectrum.clear();
-                for row in 0..spectrum_height {
-                    let max_val = -(row as f32) * row_height;
-                    let min_val = -(row as f32 + 1.0) * row_height;
-                    for &bin in output_bins {
-                        let spark = if bin < min_val {
-                            SPARKLINE[0]
-                        } else if bin > max_val {
-                            SPARKLINE.last().unwrap().clone()
-                        } else {
-                            let normalized = (bin - min_val) / row_height;
-                            let idx = (normalized * (SPARKLINE.len() - 2) as f32) as usize + 1;
-                            SPARKLINE[idx]
-                        };
-                        spectrum.push(spark);
-                    }
-                    spectrum.push('\n');
-                }
-                stdout.queue(cursor::MoveTo(0, 0))?;
-                print!("{}", spectrum);
-                stdout.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
-                stdout.flush()?;
+                display.display(output_bins)?;
             }
 
             // Buffer underrun (no new data)
             (true, _) => {
-                stdout.queue(cursor::MoveTo(0, spectrum_height as _))?;
-                stdout.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
-                print!("No new audio data since last refresh!");
-                stdout.flush()?;
+                display.report_underrun()?;
             }
 
             // Buffer overrun (audio thread overwrote buffer while we were reading)
             (false, Some(excess_samples)) => {
-                stdout.queue(cursor::MoveTo(0, spectrum_height as _))?;
-                stdout.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
-                print!(
-                    "Audio thread overwrote {} samples during readout!",
-                    excess_samples,
-                );
-                stdout.flush()?;
+                display.report_overrun(excess_samples)?;
             }
         }
     }
