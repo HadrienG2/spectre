@@ -61,7 +61,7 @@ struct CliOpts {
     /// "nuttall" has a central peak width of 2.0 bins, first sidelobes at
     /// -95dB, down to -130dB when 40 bins away.
     ///
-    #[structopt(long, default_value = "rectangular")]
+    #[structopt(long, default_value = "hann")]
     window: String,
 
     /// Amplitude scale in dBFS
