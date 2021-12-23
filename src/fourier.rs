@@ -152,14 +152,17 @@ impl ApproxConstantQTransform {
                 stride: usize,
             ) -> impl Iterator<Item = Complex<f32>> + '_ {
                 let inv_stride = 1.0 / stride as f32;
-                fft_output.windows(2).flat_map(move |pair| {
-                    let left = pair[0];
-                    let right = pair[1];
-                    (0..stride).map(move |idx| {
-                        let weight = idx as f32 * inv_stride;
-                        (1.0 - weight) * left + weight * right
+                fft_output
+                    .windows(2)
+                    .flat_map(move |pair| {
+                        let left = pair[0];
+                        let right = pair[1];
+                        (0..stride).map(move |idx| {
+                            let weight = idx as f32 * inv_stride;
+                            (1.0 - weight) * left + weight * right
+                        })
                     })
-                })
+                    .chain(std::iter::once(fft_output.last().unwrap().clone()))
             }
             let fft1_interpolant = interpolate(&fft1.output[..], stride1);
             let fft2_interpolant = interpolate(&fft2.output[..], stride2);
@@ -175,6 +178,8 @@ impl ApproxConstantQTransform {
                 *dest = (1.0 - weight) * src1 + weight * src2;
             }
         }
+
+        // TODO: After max frequency, only use interpolant of the narrowest FFT
 
         // Compute the magnitude of the merged FFT
         FourierTransform::compute_magnitudes(
