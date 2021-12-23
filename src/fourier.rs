@@ -95,12 +95,12 @@ impl FourierTransform {
             )
             .expect("Failed to compute FFT");
 
-        // Normalize amplitudes, convert to dBFS, and send the result out
-        let norm_sqr = 1.0 / self.input.len() as f32;
+        // Normalize magnitudes, convert to dBFS, and send the result out
+        let norm_sqr = 4.0 / (self.input.len() as f32).powi(2);
         for (coeff, mag) in self.output.iter().zip(self.magnitude.iter_mut()) {
-            // NOTE: dBFS formula is 20*log10(|coeff| / sqrt(N)) but we avoid a
+            // NOTE: dBFS formula is 20*log10(|coeff| / (N/2)) but we avoid a
             //       bunch of square roots by noticing that by definition of the
-            //       logarithm this is equal to 10*log10(|coeff|² / N).
+            //       logarithm this is equal to 10*log10(|coeff|² / (N/2)²).
             *mag = 10.0 * (coeff.norm_sqr() * norm_sqr).log10();
         }
         &self.magnitude[..]
