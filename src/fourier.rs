@@ -25,36 +25,17 @@ pub struct FourierTransform {
     /// Complex FFT output
     output: Box<[Complex<f32>]>,
 
-    /// Square norm factor by which the FFT squared magnitude should be multiplied
-    output_norm_sqr: f32,
-
     /// Complex FFT magnitude in dB
     magnitude: Box<[f32]>,
 }
 //
 impl FourierTransform {
-    /// Get ready to compute Fourier transforms with a certain frequency resolution (in Hz)
+    /// Get ready to compute Fourier transforms with a certain frequency
+    /// resolution (in Hz), given the audio sample rate and a choice of
+    /// window function.
     pub fn new(resolution: f32, sample_rate: usize, window: &str) -> Self {
         // Translate the desired frequency resolution into an FFT length
-        //
-        // Given 2xN input data point, a real-fft produces N+1 frequency bins
-        // ranging from 0 frequency to sampling_rate/2. So bins spacing df is
-        // sampling_rate/(2*N) Hz.
-        //
-        // By inverting this relation, we get that the smallest N needed to achieve
-        // a bin spacing smaller than df is Nmin = sampling_rate / (2 * df). We turn
-        // back that Nmin to a number of points 2xNmin, and we round that to the
-        // next power of two.
-        //
-        assert!(resolution > 0.0);
-        assert_ne!(sample_rate, 0);
-        let fft_len = 2_usize.pow((sample_rate as f32 / resolution).log2().ceil() as _);
-        info!(
-            "At a sampling rate of {} Hz, achieving the requested frequency resolution of {} Hz requires a {}-points FFT",
-            sample_rate,
-            resolution,
-            fft_len
-        );
+        let fft_len = Self::fft_len(resolution, sample_rate);
 
         // Prepare for the FFT computation
         let mut planner = RealFftPlanner::<f32>::new();
@@ -64,8 +45,8 @@ impl FourierTransform {
         let output = fft.make_output_vec().into_boxed_slice();
         let magnitude = vec![0.0; output.len()].into_boxed_slice();
 
-        // Prepare for input windowing and output normalization
-        let window: Box<[_]> = match window {
+        // Prepare for input windowing
+        let mut window: Box<[_]> = match window {
             "rectangular" => std::iter::repeat(1.0).take(input.len()).collect(),
             "triangular" => (0..input.len() / 2)
                 .chain((0..input.len() / 2).rev())
@@ -102,7 +83,12 @@ impl FourierTransform {
                 .collect(),
             _ => panic!("Window type {} is not supported", window),
         };
-        let output_norm_sqr = 4.0 / simd::sum_f32(&window[..]).powi(2);
+
+        // Pre-normalize the window function so that output is normalized
+        let output_norm = 2.0 / simd::sum_f32(&window[..]);
+        for x in window.iter_mut() {
+            *x *= output_norm;
+        }
 
         // Return the state to the client
         Self {
@@ -111,7 +97,6 @@ impl FourierTransform {
             window,
             scratch,
             output,
-            output_norm_sqr,
             magnitude,
         }
     }
@@ -150,17 +135,43 @@ impl FourierTransform {
 
         // Normalize magnitudes, convert to dBFS, and send the result out
         for (coeff, mag) in self.output.iter().zip(self.magnitude.iter_mut()) {
-            // NOTE: dBFS formula is 20*log10(|coeff| / (N/2)) but we avoid a
+            // NOTE: dBFS formula is 20*log10(|coeff|) but we avoid a
             //       bunch of square roots by noticing that by definition of the
-            //       logarithm this is equal to 10*log10(|coeff|² / (N/2)²).
+            //       logarithm this is equal to 10*log10(|coeff|²).
             // TODO: Right now, log10 computations are about 30% of the CPU
             //       consumption. This could be sped up, at the expense of
             //       losing precision, by using the floating-point exponent as
             //       an (integral) approximation of the log2. Precision can be
             //       improved by dividing by 2^N and applying this procedure
             //       recursively.
-            *mag = 10.0 * (coeff.norm_sqr() * self.output_norm_sqr).log10();
+            *mag = 10.0 * (coeff.norm_sqr()).log10();
         }
         &self.magnitude[..]
+    }
+
+    /// Determine the right FFT length to reach a certain frequency resolution,
+    /// knowing the underlying audio sampling rate
+    fn fft_len(resolution: f32, sample_rate: usize) -> usize {
+        // Translate the desired frequency resolution into an FFT length
+        //
+        // Given 2xN input data point, a real-fft produces N+1 frequency bins
+        // ranging from 0 frequency to sampling_rate/2. So bins spacing df is
+        // sampling_rate/(2*N) Hz.
+        //
+        // By inverting this relation, we get that the smallest N needed to achieve
+        // a bin spacing smaller than df is Nmin = sampling_rate / (2 * df). We turn
+        // back that Nmin to a number of points 2xNmin, and we round that to the
+        // next power of two.
+        //
+        assert!(resolution > 0.0);
+        assert_ne!(sample_rate, 0);
+        let fft_len = 2_usize.pow((sample_rate as f32 / resolution).log2().ceil() as _);
+        info!(
+            "At a sampling rate of {} Hz, achieving the requested frequency resolution of {} Hz requires a {}-points FFT",
+            sample_rate,
+            resolution,
+            fft_len
+        );
+        fft_len
     }
 }
