@@ -64,13 +64,13 @@ struct CliOpts {
     #[structopt(long, default_value = "hann")]
     window: String,
 
-    /// Amplitude scale in dBFS
+    /// Amplitude range in dBFS
     ///
     /// Signal amplitudes lower than this amount below 0dBFS will not be
     /// rendered, typically you will want to set this at your "noise floor".
     ///
     #[structopt(long, default_value = "96")]
-    amp_scale: f32,
+    amp_range: f32,
 }
 
 fn main() -> Result<()> {
@@ -89,7 +89,7 @@ fn main() -> Result<()> {
     if !opts.freq_res.is_finite() || opts.freq_res <= 0.0 {
         panic!("Please specify a sensible frequency resolution");
     }
-    if !opts.amp_scale.is_finite() {
+    if !opts.amp_range.is_finite() {
         panic!("Please specify a sensible amplitude scale");
     }
 
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
     let mut recording = audio.start_recording(history_len)?;
 
     // Initialize the terminal display
-    let mut display = display::CliDisplay::new(opts.amp_scale.abs())?;
+    let mut display = display::CliDisplay::new(opts.amp_range.abs())?;
 
     // Prepare to resample the Fourier transform for display purposes
     let mut resampler = FourierResampler::new(
