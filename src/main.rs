@@ -5,7 +5,7 @@ pub mod simd;
 
 use crate::{audio::AudioSetup, fourier::FourierTransform, resample::FourierResampler};
 use crossterm::{cursor, terminal, QueueableCommand};
-use log::{debug, error, warn};
+use log::{debug, error};
 use rt_history::Overrun;
 use std::{
     io::Write,
@@ -101,12 +101,15 @@ fn main() -> Result<()> {
     stdout.queue(cursor::Hide)?;
     stdout.queue(terminal::EnterAlternateScreen)?;
     stdout.queue(terminal::DisableLineWrap)?;
-    ctrlc::set_handler(|| {
+    let restore_terminal = || {
         let mut stdout = std::io::stdout();
         stdout.queue(cursor::Show).unwrap();
         stdout.queue(terminal::LeaveAlternateScreen).unwrap();
         stdout.queue(terminal::EnableLineWrap).unwrap();
         stdout.flush().unwrap();
+    };
+    ctrlc::set_handler(move || {
+        restore_terminal();
         std::process::exit(0);
     })?;
     const SPARKLINE: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
@@ -136,12 +139,13 @@ fn main() -> Result<()> {
         last_refresh = Instant::now();
 
         // Read latest audio history, handle xruns and audio thread errors
-        // TODO: Report audio errors visually in the final display
+        let mut underrun = false;
+        let mut overrun = None;
         last_clock = match recording.read_history(fourier.input()) {
             // Successfully read latest FFT history with a certain timestamp
             Ok(Ok(clock)) => {
                 if clock == last_clock {
-                    warn!("Buffer underrun! (No new data from audio thread)");
+                    underrun = true;
                 }
                 clock
             }
@@ -151,15 +155,13 @@ fn main() -> Result<()> {
                 clock,
                 excess_entries,
             })) => {
-                error!(
-                    "Buffer overrun! (Audio thread overwrote {} samples)",
-                    excess_entries
-                );
+                overrun = Some(excess_entries);
                 clock
             }
 
             // The audio threads have crashed, report their errors and die
             mut audio_error @ Err(_) => {
+                restore_terminal();
                 while let Err(error) = audio_error {
                     error!("Audio thread error: {:?}", error);
                     audio_error = recording.read_history(fourier.input());
@@ -169,36 +171,61 @@ fn main() -> Result<()> {
             }
         };
 
-        // Compute the Fourier transform
-        let fft_amps = fourier.compute();
+        // Display the result of the data acquisition
+        match (underrun, overrun) {
+            // Everything went fine
+            (false, None) => {
+                // Compute the Fourier transform
+                let fft_amps = fourier.compute();
 
-        // Resample it to the desired number of output bins
-        let output_bins = resampler.resample(fft_amps);
+                // Resample it to the desired number of output bins
+                let output_bins = resampler.resample(fft_amps);
 
-        // Display the resampled FFT bins
-        // FIXME: Move to a real GUI display, but maybe keep this one around
-        //        just for fun and as an exercise in abstraction.
-        spectrum.clear();
-        for row in 0..spectrum_height {
-            let max_val = -(row as f32) * row_height;
-            let min_val = -(row as f32 + 1.0) * row_height;
-            for &bin in output_bins {
-                let spark = if bin < min_val {
-                    SPARKLINE[0]
-                } else if bin > max_val {
-                    SPARKLINE.last().unwrap().clone()
-                } else {
-                    let normalized = (bin - min_val) / row_height;
-                    let idx = (normalized * (SPARKLINE.len() - 2) as f32) as usize + 1;
-                    SPARKLINE[idx]
-                };
-                spectrum.push(spark);
+                // Display the resampled FFT bins
+                // FIXME: Move to a real GUI display, but maybe keep this one around
+                //        just for fun and as an exercise in abstraction.
+                spectrum.clear();
+                for row in 0..spectrum_height {
+                    let max_val = -(row as f32) * row_height;
+                    let min_val = -(row as f32 + 1.0) * row_height;
+                    for &bin in output_bins {
+                        let spark = if bin < min_val {
+                            SPARKLINE[0]
+                        } else if bin > max_val {
+                            SPARKLINE.last().unwrap().clone()
+                        } else {
+                            let normalized = (bin - min_val) / row_height;
+                            let idx = (normalized * (SPARKLINE.len() - 2) as f32) as usize + 1;
+                            SPARKLINE[idx]
+                        };
+                        spectrum.push(spark);
+                    }
+                    spectrum.push('\n');
+                }
+                stdout.queue(cursor::MoveTo(0, 0))?;
+                print!("{}", spectrum);
+                stdout.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+                stdout.flush()?;
             }
-            spectrum.push('\n');
+
+            // Buffer underrun (no new data)
+            (true, _) => {
+                stdout.queue(cursor::MoveTo(0, spectrum_height as _))?;
+                stdout.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+                print!("No new audio data since last refresh!");
+                stdout.flush()?;
+            }
+
+            // Buffer overrun (audio thread overwrote buffer while we were reading)
+            (false, Some(excess_samples)) => {
+                stdout.queue(cursor::MoveTo(0, spectrum_height as _))?;
+                stdout.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+                print!(
+                    "Audio thread overwrote {} samples during readout!",
+                    excess_samples,
+                );
+                stdout.flush()?;
+            }
         }
-        stdout.queue(cursor::MoveTo(0, 0))?;
-        print!("{}", spectrum);
-        stdout.flush()?;
     }
-    // FIXME: Must bring back cursor when
 }
