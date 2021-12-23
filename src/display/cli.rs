@@ -10,9 +10,6 @@ use std::{
 /// Useful Unicode chars for in-terminal graphs
 const SPARKLINE: [&'static str; 9] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-/// Let's cap refreshes to 144Hz for now.
-const MIN_REFRESH_PERIOD: Duration = Duration::from_millis(7);
-
 /// In-terminal spectrum display
 pub struct CliDisplay {
     /// Terminal width
@@ -64,14 +61,22 @@ impl CliDisplay {
         self.height - 1
     }
 
+    /// Wait for the previous submitted spectrum to be displayed
+    pub fn wait_for_frame(&mut self) {
+        // CLI APIs can't really do VSync, but we assume a max display rate of 144Hz
+        const MIN_REFRESH_PERIOD: Duration = Duration::from_millis(7);
+        let now = Instant::now();
+        let next_frame = self.last_display + MIN_REFRESH_PERIOD;
+        if now < next_frame {
+            std::thread::sleep(next_frame - now)
+        }
+        self.last_display = Instant::now();
+    }
+
     /// Display a spectrum
-    pub fn display(&mut self, data: &[f32]) -> Result<()> {
+    pub fn render(&mut self, data: &[f32]) -> Result<()> {
         // Validate input
         assert_eq!(data.len(), self.width as usize);
-
-        // Apply display rate limiting
-        std::thread::sleep(MIN_REFRESH_PERIOD.saturating_sub(self.last_display.elapsed()));
-        self.last_display = Instant::now();
 
         // Cache some useful quantities
         let char_amp_norm = 1. / self.char_amp_scale;

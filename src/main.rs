@@ -7,7 +7,10 @@ pub mod simd;
 use crate::{audio::AudioSetup, fourier::FourierTransform, resample::FourierResampler};
 use log::{debug, error};
 use rt_history::Overrun;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use structopt::StructOpt;
 
 /// Default Result type used throughout this app whenever bubbling errors up
@@ -107,10 +110,10 @@ fn main() -> Result<()> {
     } else {
         4 * audio.buffer_size()
     };
-    let recording = audio.start_recording(history_len)?;
+    let mut recording = audio.start_recording(history_len)?;
 
     // Initialize the terminal display
-    let display = display::CliDisplay::new(opts.amp_scale.abs())?;
+    let mut display = display::CliDisplay::new(opts.amp_scale.abs())?;
 
     // Prepare to resample the Fourier transform for display purposes
     let mut resampler = FourierResampler::new(
@@ -123,31 +126,15 @@ fn main() -> Result<()> {
     );
 
     // Handle user shutdown requests (Ctrl+C)
-    let shared_state = Arc::new(Mutex::new(Some((recording, display))));
-    let shared_state_2 = shared_state.clone();
-    ctrlc::set_handler(move || {
-        // FIXME: This waits indefinitely...
-        let mut recording_and_display_lock = shared_state_2
-            .lock()
-            .expect("Mutex state shouldn't be corrupt");
-        let recording_and_display = recording_and_display_lock
-            .take()
-            .expect("Once Ctrl+C has taken the shared state, the process should exit");
-        std::mem::drop(recording_and_display);
-        std::process::exit(0);
-    })?;
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_2 = shutdown.clone();
+    ctrlc::set_handler(move || shutdown_2.store(true, Ordering::Relaxed))?;
 
     // Start computing some FFTs
     let mut last_clock = 0;
-    loop {
-        // Access the shared state
-        // FIXME: ...because this hangs onto the lock too much
-        let mut recording_and_display_lock = shared_state
-            .lock()
-            .expect("Mutex state shouldn't be corrupt");
-        let (ref mut recording, ref mut display) = recording_and_display_lock
-            .as_mut()
-            .expect("Once Ctrl+C has taken the shared state, the process should exit");
+    'main_loop: while !shutdown.load(Ordering::Relaxed) {
+        // Wait for previously submitted data to be displayed
+        display.wait_for_frame();
 
         // Read latest audio history, handle xruns and audio thread errors
         let mut underrun = false;
@@ -177,7 +164,7 @@ fn main() -> Result<()> {
                     audio_error = recording.read_history(fourier.input());
                 }
                 error!("Audio thread exited due to errors, time to die...");
-                std::process::exit(1);
+                break 'main_loop;
             }
         };
 
@@ -192,7 +179,7 @@ fn main() -> Result<()> {
                 let output_bins = resampler.resample(fft_amps);
 
                 // Display the resampled FFT bins
-                display.display(output_bins)?;
+                display.render(output_bins)?;
             }
 
             // Buffer underrun (no new data)
@@ -206,4 +193,5 @@ fn main() -> Result<()> {
             }
         }
     }
+    Ok(())
 }
