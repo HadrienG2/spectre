@@ -4,7 +4,7 @@ mod fourier;
 mod resample;
 pub mod simd;
 
-use crate::{audio::AudioSetup, fourier::FourierTransform, resample::FourierResampler};
+use crate::{audio::AudioSetup, resample::FourierResampler};
 use log::{debug, error};
 use rt_history::Overrun;
 use std::sync::{
@@ -16,6 +16,9 @@ use structopt::StructOpt;
 /// Default Result type used throughout this app whenever bubbling errors up
 /// seems to be the only sensible option.
 pub use anyhow::Result;
+
+/// Current Fourier transform implementation in use
+type FourierTransform = fourier::ApproxConstantQTransform;
 
 // Command-line parameters
 #[derive(Debug, StructOpt)]
