@@ -77,20 +77,20 @@ fn main() -> Result<()> {
     // Set up logging
     env_logger::init();
 
-    // Decode CLI arguments
+    // Decode and validate CLI arguments
     let opts = CliOpts::from_args();
     debug!("Got CLI options {:?}", opts);
     if !opts.min_freq.is_finite() || opts.min_freq < 0.0 {
-        panic!("Please enter a sensible minimum frequency");
+        panic!("Please specify a sensible minimum frequency");
     }
     if !opts.max_freq.is_finite() || opts.max_freq <= opts.min_freq {
-        panic!("Please enter a sensible maximum frequency");
+        panic!("Please specify a sensible maximum frequency");
     }
     if !opts.freq_res.is_finite() || opts.freq_res <= 0.0 {
-        panic!("Please enter a sensible frequency resolution");
+        panic!("Please specify a sensible frequency resolution");
     }
     if !opts.amp_scale.is_finite() {
-        panic!("Please enter a sensible amplitude scale");
+        panic!("Please specify a sensible amplitude scale");
     }
 
     // Set up the audio stack
@@ -159,6 +159,7 @@ fn main() -> Result<()> {
 
             // The audio threads have crashed, report their errors and die
             mut audio_error @ Err(_) => {
+                std::mem::drop(display);
                 while let Err(error) = audio_error {
                     error!("Audio thread error: {:?}", error);
                     audio_error = recording.read_history(fourier.input());
