@@ -6,6 +6,7 @@ pub mod simd;
 use crate::{audio::AudioSetup, fourier::FourierTransform, resample::FourierResampler};
 use log::{debug, error, warn};
 use rt_history::Overrun;
+use std::time::{Duration, Instant};
 use structopt::StructOpt;
 
 /// Default Result type used throughout this app whenever bubbling errors up
@@ -103,12 +104,13 @@ fn main() -> Result<()> {
 
     // Start computing some FFTs
     let mut last_clock = 0;
+    let mut last_refresh = Instant::now();
     loop {
-        // FIXME: Simulate vertical synchronization
-        std::thread::sleep(
-            // TODO: Should be provided by terminal display
-            std::time::Duration::from_millis(100), /* std::time::Duration::from_millis(7) */
-        );
+        // Simulate vertical synchronization
+        // FIXME: Extract to console backend
+        const REFRESH_PERIOD: Duration = Duration::from_millis(100);
+        std::thread::sleep(REFRESH_PERIOD.saturating_sub(last_refresh.elapsed()));
+        last_refresh = Instant::now();
 
         // Read latest audio history, handle xruns and audio thread errors
         // TODO: Report audio errors visually in the final display
