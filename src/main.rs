@@ -130,6 +130,10 @@ fn main() -> Result<()> {
     };
     ctrlc::set_handler(move || {
         restore_terminal();
+        // TODO: Cleanly shut down JACK client. This requires putting
+        //       "recording" someplace where the Ctrl+C handler thread can
+        //       reach it and move it away, and protecting it against
+        //       multi-threaded access. A Mutex<Option> should work.
         std::process::exit(0);
     })?;
     const SPARKLINE: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
