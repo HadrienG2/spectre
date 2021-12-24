@@ -4,8 +4,6 @@
 
 ### Thread DSP
 
-* _TODO: Ajouter la décimation => Plusieurs tampons FFT à gérer basés sur les
-  N/2, N/4... derniers samples._.
 * _TODO: Ajouter algos de réduction de bruit FFT basés sur la conservation d'un
   tampon circulaire d'amplitudes FFTs précédentes ici + regarder la tronche du
   bruit et en fonction essayer median filtering ou autre_.
@@ -96,18 +94,6 @@
   nouvelles données, et support de l'échelle log dans le spectrogramme via un
   fragment shader plus intelligent.
     * Validation: Test sur signaux audio synthétiques d'amsynth.
-* [ ] Ajout de décimation dans le thread DSP, compositing des
-  différentes décimations en une amplitude unique soumise au thread graphique,
-  du point de vue de qui rien ne devrait changer.
-    * Validation: Test sur signaux audio synthétiques.
-* [ ] Essayer d'aller souplement d'une décimation à la suivante en
-  faisant une moyenne pondérée (ex: supposons que le bin de fréquence plus
-  élevée soit sur une fenêtre N=64 et celui d'après soit sur une fenêtre N=128,
-  alors du dernier point absolu M au dernier point de la première fenêtre M-64
-  on fait une moyenne pondérée entre les deux fenêtres selon à quel point on est
-  proche de k=M-64).
-    * Validation: Enregistrer des signaux réels transitoires (ex: chocs),
-      vérifier qu'il n'y a plus de discontinuités marquées dans le spectrogramme.
 * [ ] Supporter le redimensionnement de la fenêtre sans perdre le
   caractère RT du thread graphique: les nouvelles allocations de mémoire vidéo
   sont faires par un thread séparé et remplacées à la volée par un algo qui est
