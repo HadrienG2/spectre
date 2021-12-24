@@ -38,9 +38,10 @@ pub fn log10_1pct(x: f32) -> f32 {
     // Extract the floating-point exponent using IEEE-754 sorcery
     assert_eq!(f32::RADIX, 2);
     const F32_BITS: u32 = std::mem::size_of::<f32>() as u32 * 8;
-    const EXPONENT_DIGITS: u32 = F32_BITS - f32::MANTISSA_DIGITS - 1;
-    let exponent_bits = (x.to_bits() >> f32::MANTISSA_DIGITS) & ((1 << EXPONENT_DIGITS) - 1);
-    let exponent = exponent_bits as i32 - 2i32.pow(EXPONENT_DIGITS - 1);
+    const MANTISSA_BITS: u32 = f32::MANTISSA_DIGITS - 1;
+    const EXPONENT_BITS: u32 = F32_BITS - MANTISSA_BITS - 1;
+    let exponent_bits = (x.to_bits() >> MANTISSA_BITS) & ((1 << EXPONENT_BITS) - 1);
+    let exponent = exponent_bits as i32 - 2i32.pow(EXPONENT_BITS - 1) + 1;
 
     // The exponent is the integer part of x.log2(). We normalize x by that,
     // which gives us a number w in the [0.5; 2[ range whose log2 is the
@@ -59,18 +60,18 @@ pub fn log10_1pct(x: f32) -> f32 {
     let mut polynomial = [
         w_m1,
         w_m1 * w_m1,
-        w_m1 * (w_m1 * w_m1),
+        (w_m1 * w_m1) * w_m1,
         (w_m1 * w_m1) * (w_m1 * w_m1),
     ];
     for (monome, &coeff) in polynomial.iter_mut().zip(coeffs.iter()) {
         *monome *= coeff;
     }
-    let log2_w = polynomial.iter().sum::<f32>();
+    let log2_w = polynomial.iter().rev().sum::<f32>();
 
     // From this, we trivially deduce an approximation of x.log2(), that we can
     // turn into an approximation of x.log10().
     let log2_x = exponent as f32 + log2_w;
-    1.0 / 10.0f32.log2() * log2_x
+    1.0 / std::f32::consts::LOG2_10 * log2_x
 }
 
 #[cfg(test)]
