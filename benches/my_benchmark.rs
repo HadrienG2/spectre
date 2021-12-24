@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use spectre::simd;
+use spectre::math::{self, simd};
 
 // NOTE: Due to current criterion limitations, you must rename main.rs into
 //       lib.rs in order to be able to run this benchmark.
@@ -27,7 +27,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             b.iter(|| input.iter().sum::<f32>());
         });
         group.bench_with_input(format!("optimized/{}", input_len), &input, |b, input| {
-            b.iter(|| simd::sum_f32(&input[..]));
+            b.iter(|| math::sum_f32(&input[..]));
         });
         /*
         // These benchmarks are useful for tuning simd::sum_f32, but require

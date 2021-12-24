@@ -1,6 +1,6 @@
 //! Fourier transform computation and processing
 
-use crate::simd;
+use crate::math;
 use log::info;
 use realfft::{num_complex::Complex, RealFftPlanner, RealToComplex};
 use std::sync::Arc;
@@ -334,7 +334,7 @@ impl FourierTransform {
         };
 
         // Pre-normalize the window function so that output is normalized
-        let output_norm = 2.0 / simd::sum_f32(&window[..]);
+        let output_norm = 2.0 / math::sum_f32(&window[..]);
         for x in window.iter_mut() {
             *x *= output_norm;
         }
@@ -354,7 +354,7 @@ impl FourierTransform {
     fn prepare_input(&mut self) {
         // Remove DC offset if configured to do so
         if REMOVE_DC {
-            let average = simd::sum_f32(&self.input[..]) / self.input.len() as f32;
+            let average = math::sum_f32(&self.input[..]) / self.input.len() as f32;
             self.input.iter_mut().for_each(|elem| *elem -= average);
         }
     }

@@ -1,8 +1,8 @@
 mod audio;
 mod display;
 mod fourier;
+pub mod math;
 mod resample;
-pub mod simd;
 
 use crate::{audio::AudioSetup, resample::FourierResampler};
 use log::{debug, error};
