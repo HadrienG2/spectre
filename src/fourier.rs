@@ -446,9 +446,10 @@ impl FourierTransform {
             // NOTE: dBFS formula is 20*log10(|coeff|) but we avoid a
             //       bunch of square roots by noticing that by definition of the
             //       logarithm this is equal to 10*log10(|coeff|²).
-            // NOTE: 1% resolution gives us a 0.1dB amplitude resolution, which
-            //       is below the amplitude resolution of human earing.
-            *mag = 10.0 * math::log10_1pct(coeff.norm_sqr());
+            // NOTE: 5% resolution gives us a 0.5dB amplitude resolution, which
+            //       is the smallest loudness difference that humans can ear
+            //       according to https://www.redsharknews.com/audio/item/4039-the-limits-of-hearing .
+            *mag = 10.0 * math::log10_5pct(coeff.norm_sqr());
         }
         magnitude
     }
