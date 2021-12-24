@@ -6,7 +6,7 @@ use realfft::num_complex::Complex;
 
 pub use simd::sum_f32;
 
-/// Interpolate a table of complex numbers into a series that is Nx larger
+/// Interpolate a table of complex numbers into a series that is ~Nx larger
 pub fn interpolate_c32(
     input: &[Complex<f32>],
     stride: usize,
@@ -24,7 +24,7 @@ pub fn interpolate_c32(
                 (1.0 - weight) * left + weight * right
             })
         })
-        .chain(std::iter::repeat(input.last().unwrap().clone()).take(stride))
+        .chain(std::iter::once(input.last().unwrap().clone()))
 }
 
 #[cfg(test)]
@@ -35,11 +35,11 @@ mod tests {
 
     #[quickcheck]
     fn interpolate_c32(input: Vec<f32>, stride: usize) -> TestResult {
-        // Ignore silly configurations and keep output below 4MB
+        // Ignore silly configurations and keep output below 4KB
         if input.len() < 2
             || input.iter().any(|x| !x.is_finite())
             || stride == 0
-            || input.len().saturating_mul(stride) > 1_000_000
+            || input.len().saturating_mul(stride) > 1_024
         {
             return TestResult::discard();
         }
@@ -54,7 +54,7 @@ mod tests {
         let output = super::interpolate_c32(&input[..], stride).collect::<Box<[_]>>();
 
         // Check that the interpolant has the right length
-        assert_eq!(output.len(), stride * input.len());
+        assert_eq!(output.len(), stride * (input.len() - 1) + 1);
 
         // Check that the interpolant has the right values
         for (idx, &output) in output.iter().enumerate() {
