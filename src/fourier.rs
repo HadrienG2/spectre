@@ -446,6 +446,14 @@ impl FourierTransform {
             // NOTE: dBFS formula is 20*log10(|coeff|) but we avoid a
             //       bunch of square roots by noticing that by definition of the
             //       logarithm this is equal to 10*log10(|coeff|²).
+            // TODO: This loop currently eats 20% of the CPU time, which is
+            //       about as much as the FFTs, due to scalar log computations.
+            //       I tried using a simpler log approximation (only 0.5dB
+            //       resolution or 5% log10 resolution would be enough) but it
+            //       only saves a few % of CPU time so it's gone in commit
+            //       408833fc89895cb4231d1c62b21cedce88f87b83 . Revisit this
+            //       later with a manually vectorized loop (using SIMD
+            //       deinterleave for the initial norm_sqr computations).
             *mag = 10.0 * coeff.norm_sqr().log10();
         }
         magnitude
