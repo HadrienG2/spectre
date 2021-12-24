@@ -20,17 +20,17 @@ pub use anyhow::Result;
 // Command-line parameters
 #[derive(Debug, StructOpt)]
 struct CliOpts {
-    /// Minimum monitored frequency in Hz
+    /// Minimum displayed frequency in Hz
     #[structopt(long, default_value = "20.0")]
     min_freq: f32,
 
-    /// Maximum monitored frequency in Hz
+    /// Maximum displayed frequency in Hz
     #[structopt(long, default_value = "20000.0")]
     max_freq: f32,
 
     /// Minimal frequency resolution in Hz
     ///
-    /// This is the minimal FFT bin spacing at 20Hz, actual frequency resolution
+    /// This is the minimal FFT bin spacing at 20Hz. Actual frequency resolution
     /// will be a bit more, depending on the choice of window function.
     ///
     #[structopt(long, default_value = "1.0")]
