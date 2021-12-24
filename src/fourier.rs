@@ -153,25 +153,8 @@ impl ApproxConstantQTransform {
             let stride2 = 2 * stride1;
 
             // Produce linear interpolants of each FFT on the merged FFT's bins
-            fn interpolate(
-                fft_output: &[Complex<f32>],
-                stride: usize,
-            ) -> impl Iterator<Item = Complex<f32>> + '_ {
-                let inv_stride = 1.0 / stride as f32;
-                fft_output
-                    .windows(2)
-                    .flat_map(move |pair| {
-                        let left = pair[0];
-                        let right = pair[1];
-                        (0..stride).map(move |idx| {
-                            let weight = idx as f32 * inv_stride;
-                            (1.0 - weight) * left + weight * right
-                        })
-                    })
-                    .chain(std::iter::once(fft_output.last().unwrap().clone()))
-            }
-            let fft1_interpolant = interpolate(&fft1.output[..], stride1);
-            let fft2_interpolant = interpolate(&fft2.output[..], stride2);
+            let fft1_interpolant = math::interpolate_c32(&fft1.output[..], stride1);
+            let fft2_interpolant = math::interpolate_c32(&fft2.output[..], stride2);
 
             // Perform the FFT merging
             for ((dest, (src1, src2)), weight) in self
