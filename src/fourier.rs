@@ -3,36 +3,31 @@
 use crate::math;
 use log::info;
 use realfft::{num_complex::Complex, RealFftPlanner, RealToComplex};
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
 /// Remove DC offset before computing a Fourier transform
 const REMOVE_DC: bool = true;
 
-/// Fast approximation of a constant-Q transform
+/// Fast and sane approximation of a constant-Q transform
 ///
 /// The constant-Q transform is a cousin of the Fourier transform whose bins are
-/// distributed exponentially, rather than linearly, which better matches human
-/// perception. Unfortunately, this transform does not enjoy the luxury of a
-/// super-fast algorithm like its linearly spaced cousin, so we approximate it
-/// as a weighted average of "easy" FFTs.
+/// distributed exponentially, rather than linearly. This better matches human
+/// perception, which is roughly logarithmic in frequency, but unfortunately
+/// this transform also has two problems:
+///
+/// - The FFT trick does not trivially apply to the constant-Q transform.
+/// - A short-term constant-Q transform has a an input length that either
+///   diverges to infinity at low frequencies (which is intractable) or
+///   converges to zero at high frequencies (which is useless).
+///
+/// We address the first problem by approximating the constant-Q transform as
+/// a weighted average of radix-2 FFTs, and the second problem by bounding
+/// the set of radix-2 FFTs that we will use for STFT to a useful amount.
 ///
 // FIXME: This currently computes obviously wrong results (no activity in bins
 //        on the right), figure out why.
 //
-//        I suspect the basic premise of dividing FFT length by 2 indefinitely
-//        until 20kHz is reached is also flawed and should be rethought. An
-//        alternative would be to specify a frequency resolution at 20Hz and
-//        a response time at 20kHz, deduce a number of decimations from that
-//        and use those decimations. If so, must make sure to fill the end of
-//        merged_output with data from the last FFT.
-//
-//        Another path to think about is to be constant-Q in the middle of the
-//        log frequency scale (which is where most interesting things happen)
-//        and standard FFT on the sides. After all, specifying a frequency
-//        resolution at 20Hz and a time resolution at 20kHz does not specify
-//        where the transition between these two constraints should happen.
-//
-pub struct ApproxConstantQTransform {
+pub struct SteadyQTransform {
     /// Radix-2 FFTs used to approximate the constant-Q transform, and frequency
     /// bin of the base (first) FFT on which each one is considered optimal.
     ffts_and_optimal_bins: Box<[(FourierTransform, f32)]>,
@@ -44,31 +39,100 @@ pub struct ApproxConstantQTransform {
     merged_output: Box<[Complex<f32>]>,
 }
 //
-impl ApproxConstantQTransform {
+impl SteadyQTransform {
     /// Get ready to compute approximate constant-Q transforms with a certain
-    /// frequency resolution at 20Hz (in Hz), given the audio sampling rate and
-    /// a choice of window function.
-    pub fn new(resolution_at_20hz: f32, sample_rate: usize, window: &str) -> Self {
-        // Translate the desired frequency resolution into an FFT length
-        let fft_len_at_20hz = FourierTransform::fft_len(resolution_at_20hz, sample_rate);
+    /// frequency resolution at 20Hz (in Hz) and time resolution at 20kHz
+    /// (in ms), given the audio sampling rate and a choice of window function.
+    pub fn new(
+        freq_res_at_20hz: f32,
+        time_res_at_20khz: f32,
+        sample_rate: usize,
+        window: &str,
+    ) -> Self {
+        // Translate the low-frequency resolution into a first FFT length
+        let mut fft_len_at_20hz = FourierTransform::fft_len(freq_res_at_20hz, sample_rate);
         let inv_bin_width_at_20hz = FourierTransform::inv_bin_width(fft_len_at_20hz, sample_rate);
+
+        // Translate the high-frequency time resolution into a last FFT length
+        let samples_at_20khz = (time_res_at_20khz * sample_rate as f32 / 1000.0) as usize;
+        let fft_len_at_20khz = if samples_at_20khz.is_power_of_two() {
+            samples_at_20khz
+        } else {
+            (samples_at_20khz / 4).next_power_of_two()
+        };
+        info!(
+            "At a sampling rate of {} Hz, achieving a time resolution of {} ms requires a {}-points FFT",
+            sample_rate,
+            time_res_at_20khz,
+            fft_len_at_20khz
+        );
+
+        // If the time resolution constraint is harsher than the frequency
+        // resolution one, pick the FFT length accordingly.
+        if fft_len_at_20khz > fft_len_at_20hz {
+            info!(
+                "Can achieve desired time-frequency resolution compromise with a single {}-points FFT",
+                fft_len_at_20khz
+            );
+            fft_len_at_20hz = fft_len_at_20khz;
+        }
+
+        // Check that the constant-Q transform can fulfill those constraints
+        // There is a factor of 1000 between the start and the end of the range,
+        // so we cannot cover that range with more than 11 FFTs (base FFT +
+        // decimations 1/2, 1/4, 1/8, ..., 1/1024.
+        debug_assert!(fft_len_at_20hz.is_power_of_two());
+        let fft_len_at_20hz_pow2 = fft_len_at_20hz.trailing_zeros();
+        let fft_len_at_20khz_pow2 = fft_len_at_20khz.trailing_zeros();
+        let num_ffts = (fft_len_at_20hz_pow2 - fft_len_at_20khz_pow2 + 1) as usize;
+        assert!(
+            num_ffts <= 11,
+            "Cannot achieve requested time-frequency resolution compromise ({} Hz at 20Hz, {} ms at 20kHz)",
+            freq_res_at_20hz, time_res_at_20khz
+        );
 
         // Set up all the radix-2 FFTs required to approximate a constant-Q
         // transform, and record on which bin of the 20Hz FFT we consider each
-        // of these radix-2 FFTs to be an optimal approximation
+        // of these radix-2 FFTs to be an optimal approximation. Spread the FFTs
+        // around the center of the 20Hz-20kHz log scale.
         let mut planner = RealFftPlanner::<f32>::new();
-        let mut optimal_freq = 10.0;
-        let mut fft_len = 2 * fft_len_at_20hz;
-        let mut ffts_and_optimal_bins = Vec::new();
-        while optimal_freq < 20_000.0 {
-            fft_len = (fft_len / 2).max(2);
-            optimal_freq *= 2.0;
-            ffts_and_optimal_bins.push((
-                FourierTransform::from_fft(planner.plan_fft_forward(fft_len), window),
-                optimal_freq * inv_bin_width_at_20hz,
-            ));
+        let mut ffts_and_optimal_bins = VecDeque::new();
+        let center_freq = (20.0f32 * 20_000.0).sqrt() * inv_bin_width_at_20hz;
+        let center_right_len = 2usize.pow((fft_len_at_20hz_pow2 + fft_len_at_20khz_pow2) / 2);
+        let mut pick_fft = |freq, len| {
+            info!(
+                "Will use a {}-points FFT at {} Hz",
+                len,
+                freq / inv_bin_width_at_20hz
+            );
+            (
+                FourierTransform::from_fft(planner.plan_fft_forward(len), window),
+                freq,
+            )
+        };
+        let (mut left_freq, mut left_len, mut right_freq, mut right_len);
+        if num_ffts % 2 == 0 {
+            left_freq = center_freq / std::f32::consts::SQRT_2;
+            left_len = center_right_len * 2;
+            right_freq = center_freq * std::f32::consts::SQRT_2;
+            right_len = center_right_len;
+        } else {
+            ffts_and_optimal_bins.push_front(pick_fft(center_freq, center_right_len));
+            left_freq = center_freq / 2.0;
+            left_len = center_right_len * 2;
+            right_freq = center_freq * 2.0;
+            right_len = center_right_len / 2;
         }
-        let ffts_and_optimal_bins = ffts_and_optimal_bins.into_boxed_slice();
+        while ffts_and_optimal_bins.len() < num_ffts {
+            ffts_and_optimal_bins.push_front(pick_fft(left_freq, left_len));
+            left_freq /= 2.0;
+            left_len *= 2;
+            ffts_and_optimal_bins.push_back(pick_fft(right_freq, right_len));
+            right_freq *= 2.0;
+            right_len /= 2;
+        }
+        debug_assert_eq!(ffts_and_optimal_bins.len(), num_ffts);
+        let ffts_and_optimal_bins: Box<[_]> = ffts_and_optimal_bins.drain(..).collect();
         let merged_output = ffts_and_optimal_bins[0].0.output.clone();
 
         // For each consecutive pair of radix-2 FFTs, determine the weights to
@@ -82,7 +146,6 @@ impl ApproxConstantQTransform {
                 let start_idx = bin1.ceil() as usize;
                 let end_idx = bin2.ceil() as usize;
                 (start_idx..end_idx)
-                    // FIXME: Cross-check this formula
                     .map(|idx| ((idx as f32).log2() - bin1.log2()) / (bin2.log2() - bin1.log2()))
                     .collect()
             })
@@ -98,12 +161,12 @@ impl ApproxConstantQTransform {
 
     /// Access the input buffer
     pub fn input(&mut self) -> &mut [f32] {
-        &mut self.first_fft_mut().input[..]
+        self.first_fft_mut().input()
     }
 
     /// Query the output length
     pub fn output_len(&self) -> usize {
-        self.first_fft().output.len()
+        self.first_fft().output_len()
     }
 
     /// Compute the constant-Q transform approximation and return coefficient
@@ -122,12 +185,12 @@ impl ApproxConstantQTransform {
             fft.window_and_compute_fft();
         }
 
-        // Compute the first FFT (this will garble its input, so we do it last)
+        // Compute the first FFT (this will garble its input, so do it last)
         first_fft.window_and_compute_fft();
 
-        // For inaudible frequencies below 20Hz, follow the first (widest) FFT
-        let bins_below_20hz = first_optimal_bin.ceil() as usize;
-        self.merged_output[..bins_below_20hz].copy_from_slice(&first_fft.output[..bins_below_20hz]);
+        // For the lowest frequencies, follow the first (widest) FFT
+        let low_bins = first_optimal_bin.ceil() as usize;
+        self.merged_output[..low_bins].copy_from_slice(&first_fft.output[..low_bins]);
 
         // After that, combine pairs of consecutive radix-2 FFTs using the
         // previously determined weights. Bear in mind that those FFTs must be
@@ -168,7 +231,21 @@ impl ApproxConstantQTransform {
             }
         }
 
-        // TODO: After max frequency, only use interpolant of the narrowest FFT
+        // For the highest frequencies, follow interpolant of the last (narrowest) FFT
+        let (last_fft, last_optimal_bin) = self.ffts_and_optimal_bins.last().unwrap();
+        let high_bins = last_optimal_bin.ceil() as usize;
+        let last_fft_interpolant = math::interpolate_c32(
+            &last_fft.output[..],
+            2usize.pow(self.ffts_and_optimal_bins.len() as u32 - 1),
+        );
+        for (dest, src) in self
+            .merged_output
+            .iter_mut()
+            .zip(last_fft_interpolant)
+            .skip(high_bins)
+        {
+            *dest = src
+        }
 
         // Compute the magnitude of the merged FFT
         FourierTransform::compute_magnitudes(
@@ -187,7 +264,7 @@ impl ApproxConstantQTransform {
     }
 }
 
-/// Fourier transform processor
+/// Short-term Fourier transform
 pub struct FourierTransform {
     /// FFT implementation
     fft: Arc<dyn RealToComplex<f32>>,
@@ -212,6 +289,7 @@ impl FourierTransform {
     /// Get ready to compute Fourier transforms with a certain frequency
     /// resolution (in Hz), given the audio sample rate and a choice of
     /// window function.
+    #[allow(unused)]
     pub fn new(resolution: f32, sample_rate: usize, window: &str) -> Self {
         let fft_len = Self::fft_len(resolution, sample_rate);
         let mut planner = RealFftPlanner::<f32>::new();
@@ -229,6 +307,7 @@ impl FourierTransform {
     }
 
     /// Compute the Fourier transform and return coefficient magnitudes in dBFS
+    #[allow(unused)]
     pub fn compute(&mut self) -> &[f32] {
         self.prepare_input();
         self.window_and_compute_fft();

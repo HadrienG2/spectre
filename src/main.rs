@@ -4,7 +4,7 @@ mod fourier;
 pub mod math;
 mod resample;
 
-use crate::{audio::AudioSetup, resample::FourierResampler};
+use crate::{audio::AudioSetup, fourier::SteadyQTransform, resample::FourierResampler};
 use log::{debug, error};
 use rt_history::Overrun;
 use std::sync::{
@@ -16,9 +16,6 @@ use structopt::StructOpt;
 /// Default Result type used throughout this app whenever bubbling errors up
 /// seems to be the only sensible option.
 pub use anyhow::Result;
-
-/// Current Fourier transform implementation in use
-type FourierTransform = fourier::ApproxConstantQTransform;
 
 // Command-line parameters
 #[derive(Debug, StructOpt)]
@@ -38,6 +35,16 @@ struct CliOpts {
     ///
     #[structopt(long, default_value = "1.0")]
     freq_res: f32,
+
+    /// Minimal time resolution in ms
+    ///
+    /// This is the time resolution provided by the FFT at 20kHz. It cannot be
+    /// set indefinitely small, at some point the limit of the constant Q
+    /// transform's ability to accomodate both frequency and time resolution
+    /// constraints will be reached.
+    ///
+    #[structopt(long, default_value = "7.0")]
+    time_res: f32,
 
     /// Use a linear frequency scale
     ///
@@ -92,6 +99,9 @@ fn main() -> Result<()> {
     if !opts.freq_res.is_finite() || opts.freq_res <= 0.0 {
         panic!("Please specify a sensible frequency resolution");
     }
+    if !opts.time_res.is_finite() || opts.time_res <= 0.0 {
+        panic!("Please specify a sensible time resolution");
+    }
     if !opts.amp_range.is_finite() {
         panic!("Please specify a sensible amplitude scale");
     }
@@ -104,7 +114,8 @@ fn main() -> Result<()> {
     }
 
     // Set up the Fourier transform
-    let mut fourier = FourierTransform::new(opts.freq_res, sample_rate, &opts.window);
+    let mut fourier =
+        SteadyQTransform::new(opts.freq_res, opts.time_res, sample_rate, &opts.window);
 
     // Start recording audio, keeping enough history that the audio thread can
     // write two full periods before triggering an FFT input readout overrun.

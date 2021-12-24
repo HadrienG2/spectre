@@ -6,8 +6,7 @@ use realfft::num_complex::Complex;
 
 pub use simd::sum_f32;
 
-/// Interpolate a table of complex numbers into a series of complex numbers that
-/// is approximately N times larger.
+/// Interpolate a table of complex numbers into a series that is Nx larger
 pub fn interpolate_c32(
     input: &[Complex<f32>],
     stride: usize,
@@ -24,5 +23,5 @@ pub fn interpolate_c32(
                 (1.0 - weight) * left + weight * right
             })
         })
-        .chain(std::iter::once(input.last().unwrap().clone()))
+        .chain(std::iter::repeat(input.last().unwrap().clone()).take(stride))
 }
