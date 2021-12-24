@@ -128,3 +128,5 @@ fn sum_f32_impl<const CONCURRENCY: usize, const BLOCK_SIZE: usize>(input: &[f32]
     // Deduce the final result
     peel_sum + simd_sum + tail_sum
 }
+
+// TODO: Bring back tests and note about precision
