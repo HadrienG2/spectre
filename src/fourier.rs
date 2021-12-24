@@ -224,7 +224,7 @@ impl SteadyQTransform {
                 .merged_output
                 .iter_mut()
                 .zip(fft1_interpolant.zip(fft2_interpolant))
-                .take(start_idx)
+                .skip(start_idx)
                 .zip(transition_weights.iter())
             {
                 *dest = (1.0 - weight) * src1 + weight * src2;
@@ -234,10 +234,8 @@ impl SteadyQTransform {
         // For the highest frequencies, follow interpolant of the last (narrowest) FFT
         let (last_fft, last_optimal_bin) = self.ffts_and_optimal_bins.last().unwrap();
         let high_bins = last_optimal_bin.ceil() as usize;
-        let last_fft_interpolant = math::interpolate_c32(
-            &last_fft.output[..],
-            2usize.pow(self.ffts_and_optimal_bins.len() as u32 - 1),
-        );
+        let last_stride = 2usize.pow(self.ffts_and_optimal_bins.len() as u32 - 1);
+        let last_fft_interpolant = math::interpolate_c32(&last_fft.output[..], last_stride);
         for (dest, src) in self
             .merged_output
             .iter_mut()
