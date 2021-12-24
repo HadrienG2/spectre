@@ -446,13 +446,9 @@ impl FourierTransform {
             // NOTE: dBFS formula is 20*log10(|coeff|) but we avoid a
             //       bunch of square roots by noticing that by definition of the
             //       logarithm this is equal to 10*log10(|coeff|²).
-            // TODO: Right now, log10 computations are about 30% of the CPU
-            //       consumption. This could be sped up, at the expense of
-            //       losing precision, by using the floating-point exponent as
-            //       an (integral) approximation of the log2. But that's only
-            //       3dB precision, which is very low. Maybe a bit of iterative
-            //       refinement could get us to 0.something at low-ish cost.
-            *mag = 10.0 * (coeff.norm_sqr()).log10();
+            // NOTE: 1% resolution gives us a 0.1dB amplitude resolution, which
+            //       is below the amplitude resolution of human earing.
+            *mag = 10.0 * math::log10_1pct(coeff.norm_sqr());
         }
         magnitude
     }

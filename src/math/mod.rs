@@ -27,9 +27,56 @@ pub fn interpolate_c32(
         .chain(std::iter::once(input.last().unwrap().clone()))
 }
 
+/// 1% precise log10 approximation for inputs in [0, 1] range
+pub fn log10_1pct(x: f32) -> f32 {
+    // Handle strange and small inputs
+    debug_assert!(!x.is_nan() && x >= 0.0 && x <= 1.0);
+    if x.is_subnormal() || x == 0.0 {
+        return -f32::INFINITY;
+    }
+
+    // Extract the floating-point exponent using IEEE-754 sorcery
+    assert_eq!(f32::RADIX, 2);
+    const F32_BITS: u32 = std::mem::size_of::<f32>() as u32 * 8;
+    const EXPONENT_DIGITS: u32 = F32_BITS - f32::MANTISSA_DIGITS - 1;
+    let exponent_bits = (x.to_bits() >> f32::MANTISSA_DIGITS) & ((1 << EXPONENT_DIGITS) - 1);
+    let exponent = exponent_bits as i32 - 2i32.pow(EXPONENT_DIGITS - 1);
+
+    // The exponent is the integer part of x.log2(). We normalize x by that,
+    // which gives us a number w in the [0.5; 2[ range whose log2 is the
+    // fractional part of x.log2().
+    let w = x / 2.0f32.powi(exponent);
+
+    // We use the Taylor expansion of log2 around 1 to approximate w.log2()
+    let w_m1 = w - 1.0;
+    use std::f32::consts::LN_2;
+    let coeffs = [
+        1.0 / LN_2,
+        -1.0 / (2.0 * LN_2),
+        1.0 / (3.0 * LN_2),
+        -1.0 / (4.0 * LN_2),
+    ];
+    let mut polynomial = [
+        w_m1,
+        w_m1 * w_m1,
+        w_m1 * (w_m1 * w_m1),
+        (w_m1 * w_m1) * (w_m1 * w_m1),
+    ];
+    for (monome, &coeff) in polynomial.iter_mut().zip(coeffs.iter()) {
+        *monome *= coeff;
+    }
+    let log2_w = polynomial.iter().sum::<f32>();
+
+    // From this, we trivially deduce an approximation of x.log2(), that we can
+    // turn into an approximation of x.log10().
+    let log2_x = exponent as f32 + log2_w;
+    1.0 / 10.0f32.log2() * log2_x
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use more_asserts::*;
     use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
 
@@ -64,6 +111,26 @@ mod tests {
             let right = input[right_idx];
             let weight = (idx % stride) as f32 / stride as f32;
             assert_eq!(output, (1.0 - weight) * left + weight * right);
+        }
+        TestResult::passed()
+    }
+
+    #[quickcheck]
+    fn log10_1pct(x: f32) -> TestResult {
+        // Ignore incompatible inputs
+        if x.is_nan() || x < 0.0 || x > 1.0 {
+            return TestResult::discard();
+        }
+
+        // Compute "exact" and approximate log10
+        let exact = x.log10();
+        let approx = super::log10_1pct(x);
+
+        // Compare results
+        if exact == -f32::INFINITY {
+            assert_eq!(approx, -f32::INFINITY);
+        } else {
+            assert_le!((approx - exact).abs(), 0.01 * exact.abs());
         }
         TestResult::passed()
     }

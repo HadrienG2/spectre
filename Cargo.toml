@@ -21,6 +21,7 @@ structopt = "0.3"
 
 [dev-dependencies]
 criterion = "0.3"
+more-asserts = "0.2"
 quickcheck = "1.0"
 quickcheck_macros = "1.0"
 
