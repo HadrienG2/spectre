@@ -36,9 +36,6 @@ pub struct GuiDisplay {
 
     /// Queue for submitting work to the GPU device
     queue: Queue,
-
-    /// Truth that the window size has changed
-    resized: bool,
 }
 //
 impl GuiDisplay {
@@ -159,7 +156,6 @@ impl GuiDisplay {
             surface_config,
             device,
             queue,
-            resized: false,
         })
     }
 
