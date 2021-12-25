@@ -181,13 +181,13 @@ fn main() -> Result<()> {
 
             // The audio threads have crashed, report their errors and die
             mut audio_error @ Err(_) => {
-                /* FIXME: let terminal_reset_result = display.reset_terminal(); */
+                let terminal_reset_result = display.reset_terminal();
                 while let Err(error) = audio_error {
                     error!("Audio thread error: {:?}", error);
                     audio_error = recording.read_history(fourier.input());
                 }
                 error!("Audio thread exited due to errors, time to die...");
-                return Ok(FrameResult::Stop) /* FIXME: terminal_reset_result.map(|()| FrameResult::Stop) */;
+                return terminal_reset_result.map(|()| FrameResult::Stop);
             }
         };
 
@@ -209,7 +209,8 @@ fn main() -> Result<()> {
             (true, _) => { /* FIXME: display.report_underrun()?; */ }
 
             // Buffer overrun (audio thread overwrote buffer while we were reading)
-            (false, Some(excess_samples)) => { /* FIXME: display.report_overrun(excess_samples)?; */ }
+            (false, Some(excess_samples)) => { /* FIXME: display.report_overrun(excess_samples)?; */
+            }
         }
 
         // All good and ready for the next frame

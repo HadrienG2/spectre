@@ -296,4 +296,10 @@ impl GuiDisplay {
                 }
             })
     }
+
+    /// Restore the terminal to its initial state
+    pub fn reset_terminal(&mut self) -> Result<()> {
+        // The GUI backend does not alter the terminal state, so this is easy
+        Ok(())
+    }
 }
