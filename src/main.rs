@@ -154,8 +154,73 @@ fn main() -> Result<()> {
     ctrlc::set_handler(move || shutdown_2.store(true, Ordering::Relaxed))?;
 
     // Start computing some FFTs
-    /* let mut last_clock = 0;
-    display.run_event_loop(|display| {
+    let mut last_clock = 0;
+    display.run_event_loop(move |display| {
+        // Check if the user has requested shutdown via Ctrl+C
+        if shutdown.load(Ordering::Relaxed) {
+            return Ok(FrameResult::Stop);
+        }
+
+        // Read latest audio history, handle xruns and audio thread errors
+        let mut underrun = false;
+        let mut overrun = None;
+        last_clock = match recording.read_history(fourier.input()) {
+            // Successfully read latest FFT history with a certain timestamp
+            Ok(Ok(clock)) => {
+                if clock == last_clock {
+                    underrun = true;
+                }
+                clock
+            }
+
+            // Some history was overwritten by the audio thread (overrun)
+            Ok(Err(Overrun {
+                clock,
+                excess_entries,
+            })) => {
+                overrun = Some(excess_entries);
+                clock
+            }
+
+            // The audio threads have crashed, report their errors and die
+            mut audio_error @ Err(_) => {
+                /* let terminal_reset_result = display.reset_terminal(); */
+                while let Err(error) = audio_error {
+                    error!("Audio thread error: {:?}", error);
+                    audio_error = recording.read_history(fourier.input());
+                }
+                error!("Audio thread exited due to errors, time to die...");
+                return Ok(FrameResult::Stop) /* terminal_reset_result.map(|()| FrameResult::Stop) */;
+            }
+        };
+
+        // Display the result of the data acquisition
+        match (underrun, overrun) {
+            // Everything went fine
+            (false, None) => {
+                // Compute the Fourier transform
+                let fft_amps = fourier.compute();
+
+                // Resample it to the desired number of output bins
+                let output_bins = resampler.resample(fft_amps);
+
+                // Display the resampled FFT bins
+                /* display.render(output_bins)?; */
+            }
+
+            // Buffer underrun (no new data)
+            (true, _) => { /* display.report_underrun()?; */ }
+
+            // Buffer overrun (audio thread overwrote buffer while we were reading)
+            (false, Some(excess_samples)) => { /* display.report_overrun(excess_samples)?; */ }
+        }
+
+        // All good and ready for the next frame
+        return Ok(FrameResult::Continue);
+    })
+
+    /* CLI version
+    display.run_event_loop(move |display| {
         // Check if the user has requested shutdown via Ctrl+C
         if shutdown.load(Ordering::Relaxed) {
             return Ok(FrameResult::Stop);
@@ -222,5 +287,4 @@ fn main() -> Result<()> {
         // All good and ready for the next frame
         return Ok(FrameResult::Continue);
     }) */
-    Ok(())
 }

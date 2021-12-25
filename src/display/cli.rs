@@ -63,24 +63,22 @@ impl CliDisplay {
     }
 
     /// Start the event loop, run a user-provided callback on every frame
-    ///
-    /// This function will call `reset_terminal()` at the end, so no other
-    /// method of the CliDisplay should be called after it has returned.
-    ///
     pub fn run_event_loop(
-        &mut self,
-        mut frame_callback: impl FnMut(&mut Self) -> Result<FrameResult>,
-    ) -> Result<()> {
+        mut self,
+        mut frame_callback: impl FnMut(&mut Self) -> Result<FrameResult> + 'static,
+    ) -> ! {
         let result = loop {
-            match frame_callback(self) {
+            match frame_callback(&mut self) {
                 Ok(FrameResult::Continue) => {}
                 Ok(FrameResult::Stop) => break Ok(()),
                 Err(e) => break Err(e),
             }
             self.wait_for_frame();
         };
-        self.reset_terminal()?;
-        result
+        self.reset_terminal().expect("Failed to reset the terminal");
+        result.expect("A failure occurred during event loop processing");
+        std::mem::drop(frame_callback);
+        std::process::exit(0)
     }
 
     /// Display a spectrum

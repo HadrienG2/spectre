@@ -1,13 +1,24 @@
 //! WGPU-based spectrum display
 
-use crate::Result;
-use log::{debug, info, warn};
-use winit::{dpi::PhysicalSize, event_loop::EventLoop, window::WindowBuilder};
+use crate::{display::FrameResult, Result};
+use log::{debug, info, trace, warn};
+use winit::{
+    dpi::PhysicalSize,
+    event::{ElementState, Event, ModifiersState, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::{Window, WindowBuilder},
+};
 
 /// GPU-accelerated spectrum display
 pub struct GuiDisplay {
     /// Event loop
-    event_loop: EventLoop<()>,
+    event_loop: Option<EventLoop<()>>,
+
+    /// Window
+    window: Window,
+
+    /// Last known window inner size
+    inner_size: PhysicalSize<u32>,
 }
 //
 impl GuiDisplay {
@@ -83,8 +94,96 @@ impl GuiDisplay {
 
         // TODO: Configure GPU rendering
 
-        Ok(Self { event_loop })
+        Ok(Self {
+            event_loop: Some(event_loop),
+            window,
+            inner_size,
+        })
     }
 
-    // TODO: Add run_event_loop, etc
+    /// Start the event loop, run a user-provided callback on every frame
+    pub fn run_event_loop(
+        mut self,
+        frame_callback: impl FnMut(&mut Self) -> Result<FrameResult> + 'static,
+    ) -> ! {
+        // TODO: Render a first frame and make the window visible
+        let mut keyboard_modifiers = ModifiersState::default();
+        let mut frame_callback = Some(frame_callback);
+        self.event_loop
+            .take()
+            .expect("Event loop should be present")
+            .run(move |event, _target, control_flow| {
+                match event {
+                    // Handle our window's events
+                    Event::WindowEvent { window_id, event } if window_id == self.window.id() => {
+                        match event {
+                            // Handle various app termination events
+                            WindowEvent::CloseRequested | WindowEvent::Destroyed => {
+                                *control_flow = ControlFlow::Exit
+                            }
+
+                            // Handle keyboard input
+                            WindowEvent::ModifiersChanged(modifiers) => {
+                                keyboard_modifiers = modifiers
+                            }
+                            //
+                            ref event @ WindowEvent::KeyboardInput { ref input, .. } => {
+                                if input.state != ElementState::Pressed {
+                                    trace!("Unhandled non-press keyboard event : {:?}", event);
+                                }
+                                match input.virtual_keycode {
+                                    Some(VirtualKeyCode::F4) if keyboard_modifiers.alt() => {
+                                        *control_flow = ControlFlow::Exit
+                                    }
+                                    _ => trace!("Unhandled key-press event : {:?}", event),
+                                }
+                            }
+                            //
+                            // TODO: Handle run-time settings changes via
+                            //       WindowEvent::ReceivedCharacter(char)
+
+                            // Resize and DPI changes
+                            WindowEvent::Resized(new_size) => {
+                                if new_size != self.inner_size {
+                                    // FIXME: Implement
+                                    panic!("Window resizing is not supported yet");
+                                }
+                            }
+                            WindowEvent::ScaleFactorChanged { .. } => {
+                                // FIXME: Implement
+                                panic!("DPI scaling is not supported yet");
+                            }
+
+                            // Log events we don't handle yet
+                            _ => trace!("Unhandled winit window event: {:?}", event),
+                        }
+                    }
+
+                    // Render new frame once all events have been processed
+                    Event::MainEventsCleared => {
+                        self.window.request_redraw();
+                    }
+                    //
+                    Event::RedrawRequested(window_id) if window_id == self.window.id() => {
+                        match frame_callback
+                            .as_mut()
+                            .expect("Frame callback should be present")(
+                            &mut self
+                        ) {
+                            Ok(FrameResult::Continue) => {}
+                            Ok(FrameResult::Stop) => *control_flow = ControlFlow::Exit,
+                            Err(e) => panic!("Frame processing failed: {}", e),
+                        }
+                    }
+
+                    // Help out winit's event loop at handling drop
+                    Event::LoopDestroyed => {
+                        std::mem::drop(frame_callback.take());
+                    }
+
+                    // Log events we don't handle yet
+                    _ => trace!("Unhandled winit event: {:?}", event),
+                }
+            })
+    }
 }
