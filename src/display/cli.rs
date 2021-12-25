@@ -64,8 +64,8 @@ impl CliDisplay {
 
     /// Start the event loop, run a user-provided callback on every frame
     ///
-    /// This function will call `reset()` at the end, so no other method of the
-    /// CliDisplay should be called after it has returned.
+    /// This function will call `reset_terminal()` at the end, so no other
+    /// method of the CliDisplay should be called after it has returned.
     ///
     pub fn run_event_loop(
         &mut self,

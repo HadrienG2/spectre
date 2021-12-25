@@ -85,4 +85,6 @@ impl GuiDisplay {
 
         Ok(Self { event_loop })
     }
+
+    // TODO: Add run_event_loop, etc
 }
