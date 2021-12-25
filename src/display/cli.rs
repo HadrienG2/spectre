@@ -40,7 +40,13 @@ impl CliDisplay {
         stdout.queue(terminal::DisableLineWrap)?;
         stdout.flush()?;
         let spectrum = String::with_capacity(
-            width as usize * height as usize * SPARKLINE.iter().map(|c| c.len()).max().unwrap_or(1),
+            width as usize
+                * height as usize
+                * SPARKLINE
+                    .iter()
+                    .map(|c| c.len())
+                    .max()
+                    .expect("There has to be sparkline chars"),
         );
         Ok(Self {
             width,
@@ -85,7 +91,10 @@ impl CliDisplay {
                 let spark = if bin < min_val {
                     SPARKLINE[0]
                 } else if bin >= max_val {
-                    SPARKLINE.last().unwrap().clone()
+                    SPARKLINE
+                        .last()
+                        .expect("There has to be sparkline chars")
+                        .clone()
                 } else {
                     let normalized = (bin - min_val) * char_amp_norm;
                     let idx = (normalized * (SPARKLINE.len() - 2) as f32) as usize + 1;
@@ -143,9 +152,15 @@ impl CliDisplay {
 impl Drop for CliDisplay {
     fn drop(&mut self) {
         let mut stdout = std::io::stdout();
-        stdout.queue(cursor::Show).unwrap();
-        stdout.queue(terminal::LeaveAlternateScreen).unwrap();
-        stdout.queue(terminal::EnableLineWrap).unwrap();
-        stdout.flush().unwrap();
+        stdout
+            .queue(cursor::Show)
+            .expect("Failed to restore console cursor");
+        stdout
+            .queue(terminal::LeaveAlternateScreen)
+            .expect("Failed to leave alternate console screen");
+        stdout
+            .queue(terminal::EnableLineWrap)
+            .expect("Failed to restore line wrapping");
+        stdout.flush().expect("Failed to send commands to stdout");
     }
 }

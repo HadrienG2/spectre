@@ -232,7 +232,10 @@ impl SteadyQTransform {
         }
 
         // For the highest frequencies, follow interpolant of the last (narrowest) FFT
-        let (last_fft, last_optimal_bin) = self.ffts_and_optimal_bins.last().unwrap();
+        let (last_fft, last_optimal_bin) = self
+            .ffts_and_optimal_bins
+            .last()
+            .expect("There has to be at least one FFT");
         let high_bins = last_optimal_bin.ceil() as usize;
         let last_stride = 2usize.pow(self.ffts_and_optimal_bins.len() as u32 - 1);
         let last_fft_interpolant = math::interpolate_c32(&last_fft.output[..], last_stride);

@@ -11,7 +11,6 @@ pub fn interpolate_c32(
     input: &[Complex<f32>],
     stride: usize,
 ) -> impl Iterator<Item = Complex<f32>> + '_ {
-    assert!(input.len() > 0);
     assert!(stride > 0);
     let inv_stride = 1.0 / stride as f32;
     input
@@ -24,7 +23,7 @@ pub fn interpolate_c32(
                 (1.0 - weight) * left + weight * right
             })
         })
-        .chain(std::iter::once(input.last().unwrap().clone()))
+        .chain(input.last().cloned())
 }
 
 #[cfg(test)]
@@ -36,8 +35,7 @@ mod tests {
     #[quickcheck]
     fn interpolate_c32(input: Vec<f32>, stride: usize) -> TestResult {
         // Ignore silly configurations and keep output below 4KB
-        if input.len() < 2
-            || input.iter().any(|x| !x.is_finite())
+        if input.iter().any(|x| !x.is_finite())
             || stride == 0
             || input.len().saturating_mul(stride) > 1_024
         {
@@ -54,7 +52,12 @@ mod tests {
         let output = super::interpolate_c32(&input[..], stride).collect::<Box<[_]>>();
 
         // Check that the interpolant has the right length
-        assert_eq!(output.len(), stride * (input.len() - 1) + 1);
+        let expected_len = if input.len() > 0 {
+            stride * (input.len() - 1) + 1
+        } else {
+            0
+        };
+        assert_eq!(output.len(), expected_len);
 
         // Check that the interpolant has the right values
         for (idx, &output) in output.iter().enumerate() {
