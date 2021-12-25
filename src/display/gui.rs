@@ -1,7 +1,8 @@
 //! WGPU-based spectrum display
 
 use crate::{display::FrameResult, Result};
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
+use wgpu::{Backends, Features, Instance, Limits, PowerPreference, RequestAdapterOptions, Surface};
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, Event, ModifiersState, VirtualKeyCode, WindowEvent},
@@ -16,6 +17,9 @@ pub struct GuiDisplay {
 
     /// Window
     window: Window,
+
+    /// Associated GPU surface
+    surface: Surface,
 
     /// Last known window inner size
     inner_size: PhysicalSize<u32>,
@@ -92,11 +96,73 @@ impl GuiDisplay {
             window.scale_factor()
         );
 
+        // Initialize WGPU adapter and presentation surface
+        let instance = Instance::new(Backends::PRIMARY);
+        let surface = unsafe { instance.create_surface(&window) };
+        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::LowPower,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        }))
+        .expect("No compatible GPU found");
+
+        // Describe adapter features
+        let adapter_features = adapter.features();
+        if adapter_features == Features::all() {
+            info!("Adapter supports all standard and native WGPU features");
+        } else if adapter_features.contains(Features::all_webgpu_mask()) {
+            let native_features = adapter_features.difference(Features::all_webgpu_mask());
+            info!(
+                "Adapter supports all standard WGPU features and also native features {:?}",
+                native_features
+            );
+        } else {
+            info!("Adapter supports WGPU features {:?}", adapter.features());
+        }
+        debug!(
+            "In other words, it does NOT support features {:?}",
+            Features::all().difference(adapter_features)
+        );
+
+        // Describe adapter limits
+        let adapter_limits = adapter.limits();
+        if adapter_limits >= Limits::default() {
+            info!("Adapter supports the default WGPU limits");
+        } else if adapter_limits >= Limits::downlevel_defaults() {
+            info!("Adapter supports the down-level WGPU limits");
+        } else {
+            error!("Detected GPU does not even support the down-level WGPU limits");
+        }
+        debug!(
+            "To be more precise, adapter goes up to {:#?}",
+            adapter.limits()
+        );
+
+        // Describe adapter WGPU compliance limits, if any
+        let downlevel_properties = adapter.get_downlevel_properties();
+        if !downlevel_properties.is_webgpu_compliant() {
+            info!(
+                "Adapter is not fully WGPU compliant, it has additional limits {:#?}",
+                adapter.get_downlevel_properties(),
+            );
+        }
+
+        // Describe preferred presentation surface format
+        let preferred_surface_format = surface
+            .get_preferred_format(&adapter)
+            .expect("By the above constraint, the surface should be compatible with the adapter");
+        info!(
+            "Got surface with preferred format {:?} and associated features {:?}",
+            preferred_surface_format,
+            adapter.get_texture_format_features(preferred_surface_format),
+        );
+
         // TODO: Configure GPU rendering
 
         Ok(Self {
             event_loop: Some(event_loop),
             window,
+            surface,
             inner_size,
         })
     }

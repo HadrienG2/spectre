@@ -5,10 +5,7 @@ pub mod math;
 mod resample;
 
 use crate::{
-    audio::AudioSetup,
-    display::{CliDisplay, FrameResult, GuiDisplay},
-    fourier::SteadyQTransform,
-    resample::FourierResampler,
+    audio::AudioSetup, display::FrameResult, fourier::SteadyQTransform, resample::FourierResampler,
 };
 use log::{debug, error};
 use rt_history::Overrun;
@@ -132,11 +129,11 @@ fn main() -> Result<()> {
     };
     let mut recording = audio.start_recording(history_len)?;
 
-    /* // Initialize the terminal display
-    let mut display = CliDisplay::new(opts.amp_range)?; */
-
-    // FIXME: Move to GUI display only later
-    let display = GuiDisplay::new(opts.amp_range)?;
+    // Initialize the GUI display
+    #[cfg(feature = "cli")]
+    let spectrum_display = crate::display::CliDisplay::new(opts.amp_range)?;
+    #[cfg(all(feature = "gui", not(feature = "cli")))]
+    let spectrum_display = crate::display::GuiDisplay::new(opts.amp_range)?;
 
     // Prepare to resample the Fourier transform for display purposes
     let mut resampler = FourierResampler::new(
@@ -155,7 +152,7 @@ fn main() -> Result<()> {
 
     // Start computing some FFTs
     let mut last_clock = 0;
-    display.run_event_loop(move |display| {
+    spectrum_display.run_event_loop(move |display| {
         // Check if the user has requested shutdown via Ctrl+C
         if shutdown.load(Ordering::Relaxed) {
             return Ok(FrameResult::Stop);
@@ -184,13 +181,13 @@ fn main() -> Result<()> {
 
             // The audio threads have crashed, report their errors and die
             mut audio_error @ Err(_) => {
-                /* let terminal_reset_result = display.reset_terminal(); */
+                /* FIXME: let terminal_reset_result = display.reset_terminal(); */
                 while let Err(error) = audio_error {
                     error!("Audio thread error: {:?}", error);
                     audio_error = recording.read_history(fourier.input());
                 }
                 error!("Audio thread exited due to errors, time to die...");
-                return Ok(FrameResult::Stop) /* terminal_reset_result.map(|()| FrameResult::Stop) */;
+                return Ok(FrameResult::Stop) /* FIXME: terminal_reset_result.map(|()| FrameResult::Stop) */;
             }
         };
 
@@ -205,86 +202,17 @@ fn main() -> Result<()> {
                 let output_bins = resampler.resample(fft_amps);
 
                 // Display the resampled FFT bins
-                /* display.render(output_bins)?; */
+                // FIXME: display.render(output_bins)?;
             }
 
             // Buffer underrun (no new data)
-            (true, _) => { /* display.report_underrun()?; */ }
+            (true, _) => { /* FIXME: display.report_underrun()?; */ }
 
             // Buffer overrun (audio thread overwrote buffer while we were reading)
-            (false, Some(excess_samples)) => { /* display.report_overrun(excess_samples)?; */ }
+            (false, Some(excess_samples)) => { /* FIXME: display.report_overrun(excess_samples)?; */ }
         }
 
         // All good and ready for the next frame
         return Ok(FrameResult::Continue);
     })
-
-    /* CLI version
-    display.run_event_loop(move |display| {
-        // Check if the user has requested shutdown via Ctrl+C
-        if shutdown.load(Ordering::Relaxed) {
-            return Ok(FrameResult::Stop);
-        }
-
-        // Read latest audio history, handle xruns and audio thread errors
-        let mut underrun = false;
-        let mut overrun = None;
-        last_clock = match recording.read_history(fourier.input()) {
-            // Successfully read latest FFT history with a certain timestamp
-            Ok(Ok(clock)) => {
-                if clock == last_clock {
-                    underrun = true;
-                }
-                clock
-            }
-
-            // Some history was overwritten by the audio thread (overrun)
-            Ok(Err(Overrun {
-                clock,
-                excess_entries,
-            })) => {
-                overrun = Some(excess_entries);
-                clock
-            }
-
-            // The audio threads have crashed, report their errors and die
-            mut audio_error @ Err(_) => {
-                let terminal_reset_result = display.reset_terminal();
-                while let Err(error) = audio_error {
-                    error!("Audio thread error: {:?}", error);
-                    audio_error = recording.read_history(fourier.input());
-                }
-                error!("Audio thread exited due to errors, time to die...");
-                return terminal_reset_result.map(|()| FrameResult::Stop);
-            }
-        };
-
-        // Display the result of the data acquisition
-        match (underrun, overrun) {
-            // Everything went fine
-            (false, None) => {
-                // Compute the Fourier transform
-                let fft_amps = fourier.compute();
-
-                // Resample it to the desired number of output bins
-                let output_bins = resampler.resample(fft_amps);
-
-                // Display the resampled FFT bins
-                display.render(output_bins)?;
-            }
-
-            // Buffer underrun (no new data)
-            (true, _) => {
-                display.report_underrun()?;
-            }
-
-            // Buffer overrun (audio thread overwrote buffer while we were reading)
-            (false, Some(excess_samples)) => {
-                display.report_overrun(excess_samples)?;
-            }
-        }
-
-        // All good and ready for the next frame
-        return Ok(FrameResult::Continue);
-    }) */
 }
