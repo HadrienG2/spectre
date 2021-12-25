@@ -139,7 +139,7 @@ fn main() -> Result<()> {
     let mut resampler = FourierResampler::new(
         fourier.output_len(),
         sample_rate,
-        /* display.width() */ 1024,
+        spectrum_display.width(),
         opts.min_freq,
         opts.max_freq,
         !opts.lin_freqs,

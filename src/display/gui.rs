@@ -201,6 +201,11 @@ impl GuiDisplay {
         })
     }
 
+    /// Report terminal width in pixels
+    pub fn width(&self) -> usize {
+        self.surface_config.width as _
+    }
+
     /// Start the event loop, run a user-provided callback on every frame
     pub fn run_event_loop(
         mut self,
