@@ -1,8 +1,11 @@
-//! WGPU-based spectrum display
+//! WebGPU-based spectrum display
 
 use crate::{display::FrameResult, Result};
 use log::{debug, error, info, trace, warn};
-use wgpu::{Backends, Features, Instance, Limits, PowerPreference, RequestAdapterOptions, Surface};
+use wgpu::{
+    Backends, Device, DeviceDescriptor, Features, Instance, Limits, PowerPreference, PresentMode,
+    Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureUsages,
+};
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, Event, ModifiersState, VirtualKeyCode, WindowEvent},
@@ -21,8 +24,14 @@ pub struct GuiDisplay {
     /// Associated GPU surface
     surface: Surface,
 
-    /// Last known window inner size
-    inner_size: PhysicalSize<u32>,
+    /// GPU surface configuration
+    surface_config: SurfaceConfiguration,
+
+    /// GPU device context
+    device: Device,
+
+    /// Queue for submitting work to the GPU device
+    queue: Queue,
 }
 //
 impl GuiDisplay {
@@ -96,7 +105,7 @@ impl GuiDisplay {
             window.scale_factor()
         );
 
-        // Initialize WGPU adapter and presentation surface
+        // Initialize WebGPU adapter and presentation surface
         let instance = Instance::new(Backends::PRIMARY);
         let surface = unsafe { instance.create_surface(&window) };
         let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
@@ -109,15 +118,15 @@ impl GuiDisplay {
         // Describe adapter features
         let adapter_features = adapter.features();
         if adapter_features == Features::all() {
-            info!("Adapter supports all standard and native WGPU features");
+            info!("Adapter supports all standard and native WebGPU features");
         } else if adapter_features.contains(Features::all_webgpu_mask()) {
             let native_features = adapter_features.difference(Features::all_webgpu_mask());
             info!(
-                "Adapter supports all standard WGPU features and also native features {:?}",
+                "Adapter supports all standard WebGPU features and also native features {:?}",
                 native_features
             );
         } else {
-            info!("Adapter supports WGPU features {:?}", adapter.features());
+            info!("Adapter supports WebGPU features {:?}", adapter.features());
         }
         debug!(
             "In other words, it does NOT support features {:?}",
@@ -127,22 +136,22 @@ impl GuiDisplay {
         // Describe adapter limits
         let adapter_limits = adapter.limits();
         if adapter_limits >= Limits::default() {
-            info!("Adapter supports the default WGPU limits");
+            info!("Adapter supports the default WebGPU limits");
         } else if adapter_limits >= Limits::downlevel_defaults() {
-            info!("Adapter supports the down-level WGPU limits");
+            info!("Adapter supports the down-level WebGPU limits");
         } else {
-            error!("Detected GPU does not even support the down-level WGPU limits");
+            error!("Detected GPU does not even support the down-level WebGPU limits");
         }
         debug!(
             "To be more precise, adapter goes up to {:#?}",
             adapter.limits()
         );
 
-        // Describe adapter WGPU compliance limits, if any
+        // Describe adapter WebGPU compliance limits, if any
         let downlevel_properties = adapter.get_downlevel_properties();
         if !downlevel_properties.is_webgpu_compliant() {
             info!(
-                "Adapter is not fully WGPU compliant, it has additional limits {:#?}",
+                "Adapter is not fully WebGPU compliant, it has additional limits {:#?}",
                 adapter.get_downlevel_properties(),
             );
         }
@@ -157,13 +166,38 @@ impl GuiDisplay {
             adapter.get_texture_format_features(preferred_surface_format),
         );
 
-        // TODO: Configure GPU rendering
+        // Configure device and queue
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &DeviceDescriptor {
+                label: Some(&"GPU"),
+                features: Features::empty(),
+                limits: Limits::downlevel_defaults(),
+            },
+            None,
+        ))?;
+        debug!("Got a device that goes up to {:#?}", device.limits());
 
+        // Set up device error handling
+        device.on_uncaptured_error(|e| error!("Uncaptured WebGPU device error: {}", e));
+
+        // Configure the surface for rendering:
+        let surface_config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format: preferred_surface_format,
+            width: inner_size.width,
+            height: inner_size.height,
+            present_mode: PresentMode::Fifo,
+        };
+        surface.configure(&device, &surface_config);
+
+        // ...and we're ready!
         Ok(Self {
             event_loop: Some(event_loop),
             window,
             surface,
-            inner_size,
+            surface_config,
+            device,
+            queue,
         })
     }
 
@@ -210,7 +244,12 @@ impl GuiDisplay {
 
                             // Resize and DPI changes
                             WindowEvent::Resized(new_size) => {
-                                if new_size != self.inner_size {
+                                if new_size
+                                    != (PhysicalSize {
+                                        width: self.surface_config.width,
+                                        height: self.surface_config.height,
+                                    })
+                                {
                                     // FIXME: Implement
                                     panic!("Window resizing is not supported yet");
                                 }
