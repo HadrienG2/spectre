@@ -1,7 +1,10 @@
 //! WebGPU-based spectrum display
 
-use crate::{display::FrameResult, Result};
-use log::{debug, error, info, trace, warn};
+use crate::{
+    display::{FrameInput, FrameResult},
+    Result,
+};
+use log::{debug, error, info, trace};
 use wgpu::{
     Backends, Device, DeviceDescriptor, Features, Instance, Limits, PowerPreference, PresentMode,
     Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureUsages,
@@ -32,6 +35,9 @@ pub struct GuiDisplay {
 
     /// Queue for submitting work to the GPU device
     queue: Queue,
+
+    /// Truth that the window size has changed
+    resized: bool,
 }
 //
 impl GuiDisplay {
@@ -42,55 +48,9 @@ impl GuiDisplay {
         // Set up event loop
         let event_loop = EventLoop::new();
 
-        // Infer maximal window size from monitor width and height
-        // TODO: Use this info later for buffer allocation, to allow resize
-        let (max_width, max_height) = event_loop
-            .available_monitors()
-            .enumerate()
-            .map(|(idx, monitor)| {
-                let PhysicalSize { width, height } = monitor.size();
-                let monitor_id = || {
-                    format!(
-                        "#{}{}",
-                        idx,
-                        monitor
-                            .name()
-                            .map(|mut name| {
-                                name.insert_str(0, " (");
-                                name.push_str(")");
-                                name
-                            })
-                            .unwrap_or("".to_string())
-                    )
-                };
-                if (width, height) == (0, 0) {
-                    warn!(
-                        "Size of monitor {} is unknown, assuming 1080p",
-                        monitor_id()
-                    );
-                    (1920, 1080)
-                } else {
-                    debug!(
-                        "Detected monitor {} with {}x{} physical pixels",
-                        monitor_id(),
-                        width,
-                        height
-                    );
-                    (width, height)
-                }
-            })
-            .fold((0, 0), |(max_width, max_height), (width, height)| {
-                (width + max_width, height + max_height)
-            });
-        info!(
-            "Inferred a maximal window size of {}x{}px",
-            max_width, max_height
-        );
-
         // Configure window
         let window = WindowBuilder::new()
-            // FIXME: We do not support resizing yet
-            .with_resizable(false)
+            .with_resizable(true)
             .with_title("Spectre")
             .with_visible(false)
             .with_transparent(false)
@@ -198,6 +158,7 @@ impl GuiDisplay {
             surface_config,
             device,
             queue,
+            resized: false,
         })
     }
 
@@ -209,11 +170,13 @@ impl GuiDisplay {
     /// Start the event loop, run a user-provided callback on every frame
     pub fn run_event_loop(
         mut self,
-        frame_callback: impl FnMut(&mut Self) -> Result<FrameResult> + 'static,
+        frame_callback: impl FnMut(&mut Self, FrameInput) -> Result<FrameResult> + 'static,
     ) -> ! {
         // TODO: Render a first frame and make the window visible
+        self.window.set_visible(true);
         let mut keyboard_modifiers = ModifiersState::default();
         let mut frame_callback = Some(frame_callback);
+        let mut resized = false;
         self.event_loop
             .take()
             .expect("Event loop should be present")
@@ -255,17 +218,25 @@ impl GuiDisplay {
                                         height: self.surface_config.height,
                                     })
                                 {
-                                    // FIXME: Implement
-                                    panic!("Window resizing is not supported yet");
+                                    self.surface_config.width = new_size.width;
+                                    self.surface_config.height = new_size.height;
+                                    resized = true;
                                 }
                             }
                             WindowEvent::ScaleFactorChanged { .. } => {
-                                // FIXME: Implement
+                                // FIXME: Implement once we have stuff to scale
                                 panic!("DPI scaling is not supported yet");
                             }
 
-                            // Log events we don't handle yet
-                            _ => trace!("Unhandled winit window event: {:?}", event),
+                            // Ignore chatty events we don't care about
+                            WindowEvent::AxisMotion { .. }
+                            | WindowEvent::CursorMoved { .. }
+                            | WindowEvent::CursorEntered { .. }
+                            | WindowEvent::CursorLeft { .. }
+                            | WindowEvent::Moved(_) => {}
+
+                            // Log other events we don't handle yet
+                            _ => trace!("Unhandled window event: {:?}", event),
                         }
                     }
 
@@ -275,10 +246,18 @@ impl GuiDisplay {
                     }
                     //
                     Event::RedrawRequested(window_id) if window_id == self.window.id() => {
+                        let mut frame_input = FrameInput {
+                            new_display_width: None,
+                        };
+                        if resized {
+                            frame_input.new_display_width = Some(self.surface_config.width as _);
+                            self.handle_resize();
+                            resized = false;
+                        }
                         match frame_callback
                             .as_mut()
                             .expect("Frame callback should be present")(
-                            &mut self
+                            &mut self, frame_input
                         ) {
                             Ok(FrameResult::Continue) => {}
                             Ok(FrameResult::Stop) => *control_flow = ControlFlow::Exit,
@@ -291,7 +270,12 @@ impl GuiDisplay {
                         std::mem::drop(frame_callback.take());
                     }
 
-                    // Log events we don't handle yet
+                    // Ignore chatty events we don't care about
+                    Event::NewEvents(_)
+                    | Event::RedrawEventsCleared
+                    | Event::DeviceEvent { .. } => {}
+
+                    // Log other events we don't handle yet
                     _ => trace!("Unhandled winit event: {:?}", event),
                 }
             })
@@ -301,5 +285,10 @@ impl GuiDisplay {
     pub fn reset_terminal(&mut self) -> Result<()> {
         // The GUI backend does not alter the terminal state, so this is easy
         Ok(())
+    }
+
+    /// Reallocate structures that depend on the window size after a resize
+    fn handle_resize(&mut self) {
+        self.surface.configure(&self.device, &self.surface_config);
     }
 }

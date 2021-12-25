@@ -136,14 +136,18 @@ fn main() -> Result<()> {
     let spectrum_display = crate::display::GuiDisplay::new(opts.amp_range)?;
 
     // Prepare to resample the Fourier transform for display purposes
-    let mut resampler = FourierResampler::new(
-        fourier.output_len(),
-        sample_rate,
-        spectrum_display.width(),
-        opts.min_freq,
-        opts.max_freq,
-        !opts.lin_freqs,
-    );
+    let fourier_len = fourier.output_len();
+    let setup_resampler = move |display_width| {
+        FourierResampler::new(
+            fourier_len,
+            sample_rate,
+            display_width,
+            opts.min_freq,
+            opts.max_freq,
+            !opts.lin_freqs,
+        )
+    };
+    let mut resampler = setup_resampler(spectrum_display.width());
 
     // Handle user shutdown requests (Ctrl+C)
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -152,10 +156,15 @@ fn main() -> Result<()> {
 
     // Start computing some FFTs
     let mut last_clock = 0;
-    spectrum_display.run_event_loop(move |display| {
+    spectrum_display.run_event_loop(move |display, frame_input| {
         // Check if the user has requested shutdown via Ctrl+C
         if shutdown.load(Ordering::Relaxed) {
             return Ok(FrameResult::Stop);
+        }
+
+        // Check if the display width has changed, recreate resampler if need be
+        if let Some(new_display_width) = frame_input.new_display_width {
+            resampler = setup_resampler(new_display_width);
         }
 
         // Read latest audio history, handle xruns and audio thread errors

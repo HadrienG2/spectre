@@ -1,6 +1,9 @@
 //! In-terminal spectrum display
 
-use crate::{display::FrameResult, Result};
+use crate::{
+    display::{FrameInput, FrameResult},
+    Result,
+};
 use crossterm::{cursor, terminal, QueueableCommand};
 use std::{
     io::Write,
@@ -65,10 +68,19 @@ impl CliDisplay {
     /// Start the event loop, run a user-provided callback on every frame
     pub fn run_event_loop(
         mut self,
-        mut frame_callback: impl FnMut(&mut Self) -> Result<FrameResult> + 'static,
+        mut frame_callback: impl FnMut(&mut Self, FrameInput) -> Result<FrameResult> + 'static,
     ) -> ! {
         let result = loop {
-            match frame_callback(&mut self) {
+            // FIXME: Support resizes. This requires polling terminal event,
+            //        which in turn requires enabling raw mode and handling
+            //        events like Ctrl+C ourselves. We'll need to do that anyway
+            //        in order to support keyboard commands.
+            match frame_callback(
+                &mut self,
+                FrameInput {
+                    new_display_width: None,
+                },
+            ) {
                 Ok(FrameResult::Continue) => {}
                 Ok(FrameResult::Stop) => break Ok(()),
                 Err(e) => break Err(e),

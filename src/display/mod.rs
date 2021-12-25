@@ -11,6 +11,12 @@ pub use cli::CliDisplay;
 #[cfg(feature = "gui")]
 pub use gui::GuiDisplay;
 
+/// Input of the frame display hook
+pub struct FrameInput {
+    /// New display width value (if any)
+    pub new_display_width: Option<usize>,
+}
+
 /// Output of the frame display hook
 pub enum FrameResult {
     /// Call me back on the next frame
