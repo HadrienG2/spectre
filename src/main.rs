@@ -4,7 +4,9 @@ mod fourier;
 pub mod math;
 mod resample;
 
-use crate::{audio::AudioSetup, fourier::SteadyQTransform, resample::FourierResampler};
+use crate::{
+    audio::AudioSetup, display::FrameResult, fourier::SteadyQTransform, resample::FourierResampler,
+};
 use log::{debug, error};
 use rt_history::Overrun;
 use std::sync::{
@@ -146,9 +148,11 @@ fn main() -> Result<()> {
 
     // Start computing some FFTs
     let mut last_clock = 0;
-    'main_loop: while !shutdown.load(Ordering::Relaxed) {
-        // Wait for previously submitted data to be displayed
-        display.wait_for_frame();
+    display.run_event_loop(|display| {
+        // Check if the user has requested shutdown via Ctrl+C
+        if shutdown.load(Ordering::Relaxed) {
+            return Ok(FrameResult::Stop);
+        }
 
         // Read latest audio history, handle xruns and audio thread errors
         let mut underrun = false;
@@ -173,13 +177,13 @@ fn main() -> Result<()> {
 
             // The audio threads have crashed, report their errors and die
             mut audio_error @ Err(_) => {
-                std::mem::drop(display);
+                let terminal_reset_result = display.reset_terminal();
                 while let Err(error) = audio_error {
                     error!("Audio thread error: {:?}", error);
                     audio_error = recording.read_history(fourier.input());
                 }
                 error!("Audio thread exited due to errors, time to die...");
-                break 'main_loop;
+                return terminal_reset_result.map(|()| FrameResult::Stop);
             }
         };
 
@@ -207,6 +211,8 @@ fn main() -> Result<()> {
                 display.report_overrun(excess_samples)?;
             }
         }
-    }
-    Ok(())
+
+        // All good and ready for the next frame
+        return Ok(FrameResult::Continue);
+    })
 }

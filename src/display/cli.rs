@@ -1,6 +1,6 @@
 //! In-terminal spectrum display
 
-use crate::Result;
+use crate::{display::FrameResult, Result};
 use crossterm::{cursor, terminal, QueueableCommand};
 use std::{
     io::Write,
@@ -62,16 +62,25 @@ impl CliDisplay {
         self.width.into()
     }
 
-    /// Wait for the previous submitted spectrum to be displayed
-    pub fn wait_for_frame(&mut self) {
-        // CLI APIs can't really do VSync, but we assume a max display rate of 144Hz
-        const MIN_REFRESH_PERIOD: Duration = Duration::from_millis(7);
-        let now = Instant::now();
-        let next_frame = self.last_display + MIN_REFRESH_PERIOD;
-        if now < next_frame {
-            std::thread::sleep(next_frame - now)
-        }
-        self.last_display = Instant::now();
+    /// Start the event loop, run a user-provided callback on every frame
+    ///
+    /// This function will call `reset()` at the end, so no other method of the
+    /// CliDisplay should be called after it has returned.
+    ///
+    pub fn run_event_loop(
+        &mut self,
+        mut frame_callback: impl FnMut(&mut Self) -> Result<FrameResult>,
+    ) -> Result<()> {
+        let result = loop {
+            match frame_callback(self) {
+                Ok(FrameResult::Continue) => {}
+                Ok(FrameResult::Stop) => break Ok(()),
+                Err(e) => break Err(e),
+            }
+            self.wait_for_frame();
+        };
+        self.reset_terminal()?;
+        result
     }
 
     /// Display a spectrum
@@ -143,24 +152,40 @@ impl CliDisplay {
         Ok(())
     }
 
+    /// Restore the terminal to its initial state
+    ///
+    /// It is safe to call this function multiple times, but no other function
+    /// should be called after it, or terminal corruption will occur.
+    ///
+    pub fn reset_terminal(&mut self) -> Result<()> {
+        let mut stdout = std::io::stdout();
+        stdout.queue(cursor::Show)?;
+        stdout.queue(terminal::LeaveAlternateScreen)?;
+        stdout.queue(terminal::EnableLineWrap)?;
+        stdout.flush()?;
+        Ok(())
+    }
+
     /// Report spectrum height in chars
     fn spectrum_height(&self) -> u16 {
         self.height - 1
+    }
+
+    /// Wait for the previous submitted spectrum to be displayed
+    fn wait_for_frame(&mut self) {
+        // CLI APIs don't do VSync, but we assume a max display rate of 144Hz
+        const MIN_REFRESH_PERIOD: Duration = Duration::from_millis(7);
+        let now = Instant::now();
+        let next_frame = self.last_display + MIN_REFRESH_PERIOD;
+        if now < next_frame {
+            std::thread::sleep(next_frame - now)
+        }
+        self.last_display = Instant::now();
     }
 }
 //
 impl Drop for CliDisplay {
     fn drop(&mut self) {
-        let mut stdout = std::io::stdout();
-        stdout
-            .queue(cursor::Show)
-            .expect("Failed to restore console cursor");
-        stdout
-            .queue(terminal::LeaveAlternateScreen)
-            .expect("Failed to leave alternate console screen");
-        stdout
-            .queue(terminal::EnableLineWrap)
-            .expect("Failed to restore line wrapping");
-        stdout.flush().expect("Failed to send commands to stdout");
+        self.reset_terminal().expect("Failed to reset the terminal");
     }
 }

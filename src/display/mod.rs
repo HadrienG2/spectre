@@ -4,3 +4,12 @@
 mod cli;
 
 pub use cli::CliDisplay;
+
+/// Output of the frame display hook
+pub enum FrameResult {
+    /// Call me back on the next frame
+    Continue,
+
+    /// It's time to exit the event loop
+    Stop,
+}
