@@ -1,7 +1,7 @@
 //! Fourier transform computation and processing
 
 use crate::math;
-use log::info;
+use log::{debug, info};
 use realfft::{num_complex::Complex, RealFftPlanner, RealToComplex};
 use std::{collections::VecDeque, sync::Arc};
 
@@ -100,7 +100,7 @@ impl SteadyQTransform {
         let center_freq = (20.0f32 * 20_000.0).sqrt() * inv_bin_width_at_20hz;
         let center_right_len = 2usize.pow((fft_len_at_20hz_pow2 + fft_len_at_20khz_pow2) / 2);
         let mut pick_fft = |freq, len| {
-            info!(
+            debug!(
                 "Will use a {}-points FFT at {} Hz",
                 len,
                 freq / inv_bin_width_at_20hz

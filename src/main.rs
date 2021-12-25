@@ -5,7 +5,10 @@ pub mod math;
 mod resample;
 
 use crate::{
-    audio::AudioSetup, display::FrameResult, fourier::SteadyQTransform, resample::FourierResampler,
+    audio::AudioSetup,
+    display::{CliDisplay, FrameResult, GuiDisplay},
+    fourier::SteadyQTransform,
+    resample::FourierResampler,
 };
 use log::{debug, error};
 use rt_history::Overrun;
@@ -90,7 +93,7 @@ fn main() -> Result<()> {
     env_logger::init();
 
     // Decode and validate CLI arguments
-    let opts = CliOpts::from_args();
+    let mut opts = CliOpts::from_args();
     debug!("Got CLI options {:?}", opts);
     if !opts.min_freq.is_finite() || opts.min_freq < 0.0 {
         panic!("Please specify a sensible minimum frequency");
@@ -107,6 +110,7 @@ fn main() -> Result<()> {
     if !opts.amp_range.is_finite() {
         panic!("Please specify a sensible amplitude scale");
     }
+    opts.amp_range = opts.amp_range.abs();
 
     // Set up the audio stack
     let audio = AudioSetup::new()?;
@@ -128,14 +132,17 @@ fn main() -> Result<()> {
     };
     let mut recording = audio.start_recording(history_len)?;
 
-    // Initialize the terminal display
-    let mut display = display::CliDisplay::new(opts.amp_range.abs())?;
+    /* // Initialize the terminal display
+    let mut display = CliDisplay::new(opts.amp_range)?; */
+
+    // FIXME: Move to GUI display only later
+    let display = GuiDisplay::new(opts.amp_range)?;
 
     // Prepare to resample the Fourier transform for display purposes
     let mut resampler = FourierResampler::new(
         fourier.output_len(),
         sample_rate,
-        display.width(),
+        /* display.width() */ 1024,
         opts.min_freq,
         opts.max_freq,
         !opts.lin_freqs,
@@ -147,7 +154,7 @@ fn main() -> Result<()> {
     ctrlc::set_handler(move || shutdown_2.store(true, Ordering::Relaxed))?;
 
     // Start computing some FFTs
-    let mut last_clock = 0;
+    /* let mut last_clock = 0;
     display.run_event_loop(|display| {
         // Check if the user has requested shutdown via Ctrl+C
         if shutdown.load(Ordering::Relaxed) {
@@ -214,5 +221,6 @@ fn main() -> Result<()> {
 
         // All good and ready for the next frame
         return Ok(FrameResult::Continue);
-    })
+    }) */
+    Ok(())
 }
