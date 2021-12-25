@@ -18,6 +18,8 @@ pub struct FrameInput {
 }
 
 /// Output of the frame display hook
+#[must_use]
+#[derive(Debug, PartialEq)]
 pub enum FrameResult {
     /// Call me back on the next frame
     Continue,

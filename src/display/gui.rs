@@ -7,7 +7,8 @@ use crate::{
 use log::{debug, error, info, trace};
 use wgpu::{
     Backends, Device, DeviceDescriptor, Features, Instance, Limits, PowerPreference, PresentMode,
-    Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureUsages,
+    Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, TextureUsages,
+    TextureViewDescriptor,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -129,7 +130,7 @@ impl GuiDisplay {
         // Configure device and queue
         let (device, queue) = pollster::block_on(adapter.request_device(
             &DeviceDescriptor {
-                label: Some(&"GPU"),
+                label: Some("GPU"),
                 features: Features::empty(),
                 limits: Limits::downlevel_defaults(),
             },
@@ -170,10 +171,23 @@ impl GuiDisplay {
     /// Start the event loop, run a user-provided callback on every frame
     pub fn run_event_loop(
         mut self,
-        frame_callback: impl FnMut(&mut Self, FrameInput) -> Result<FrameResult> + 'static,
+        mut frame_callback: impl FnMut(&mut Self, FrameInput) -> Result<FrameResult> + 'static,
     ) -> ! {
-        // TODO: Render a first frame and make the window visible
+        // Render a first frame and make the window visible
+        let first_result = frame_callback(
+            &mut self,
+            FrameInput {
+                new_display_width: None,
+            },
+        )
+        .expect("Failed to render first frame");
+        if first_result == FrameResult::Stop {
+            std::mem::drop(frame_callback);
+            std::process::exit(0);
+        }
         self.window.set_visible(true);
+
+        // Start the actual event loop
         let mut keyboard_modifiers = ModifiersState::default();
         let mut frame_callback = Some(frame_callback);
         let mut resized = false;
@@ -279,6 +293,69 @@ impl GuiDisplay {
                     _ => trace!("Unhandled winit event: {:?}", event),
                 }
             })
+    }
+
+    /// Display a spectrum
+    pub fn render(&mut self, data: &[f32]) -> Result<()> {
+        // Try to access the next window texture
+        let window_texture = match self.surface.get_current_texture() {
+            // Succeeded
+            Ok(texture) => texture,
+
+            // Some errors will just resolve themselves, perhaps with some help
+            Err(SurfaceError::Timeout | SurfaceError::Outdated) => return Ok(()),
+            Err(SurfaceError::Lost) => {
+                self.handle_resize();
+                return Ok(());
+            }
+
+            // Other errors are presumed to be serious ones and kill the app
+            #[allow(unreachable_patterns)]
+            Err(e @ (SurfaceError::OutOfMemory | _)) => Err(e)?,
+        };
+
+        // Acquire a texture view (needed for render passes)
+        let window_view = window_texture.texture.create_view(&TextureViewDescriptor {
+            label: Some("Window surface texture view"),
+            ..TextureViewDescriptor::default()
+        });
+
+        // Prepare to render on the screen texture
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Spectrum render encoder"),
+            });
+
+        // Set up a render pass with a black clear color
+        {
+            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Spectrum render Pass"),
+                color_attachments: &[wgpu::RenderPassColorAttachment {
+                    view: &window_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: None,
+            });
+        }
+
+        // TODO: Render the spectrum data here
+
+        // Submit our render command
+        self.queue.submit(Some(encoder.finish()));
+
+        // Make sure the output gets displayed on the screen
+        window_texture.present();
+        Ok(())
     }
 
     /// Restore the terminal to its initial state

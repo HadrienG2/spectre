@@ -211,7 +211,7 @@ fn main() -> Result<()> {
                 let output_bins = resampler.resample(fft_amps);
 
                 // Display the resampled FFT bins
-                // FIXME: display.render(output_bins)?;
+                display.render(output_bins)?;
             }
 
             // Buffer underrun (no new data)
