@@ -6,9 +6,12 @@ use crate::{
 };
 use log::{debug, error, info, trace};
 use wgpu::{
-    Backends, Device, DeviceDescriptor, Features, Instance, Limits, PowerPreference, PresentMode,
-    Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, TextureUsages,
-    TextureViewDescriptor,
+    Backends, BlendState, ColorTargetState, ColorWrites, Device, DeviceDescriptor, Face, Features,
+    FragmentState, FrontFace, Instance, Limits, MultisampleState, PipelineLayoutDescriptor,
+    PolygonMode, PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue,
+    RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor,
+    ShaderSource, Surface, SurfaceConfiguration, SurfaceError, TextureUsages,
+    TextureViewDescriptor, VertexState,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -36,6 +39,9 @@ pub struct GuiDisplay {
 
     /// Queue for submitting work to the GPU device
     queue: Queue,
+
+    /// Live spectrum render pipeline
+    spectrum_pipeline: RenderPipeline,
 }
 //
 impl GuiDisplay {
@@ -135,9 +141,6 @@ impl GuiDisplay {
         ))?;
         debug!("Got a device that goes up to {:#?}", device.limits());
 
-        // Set up device error handling
-        device.on_uncaptured_error(|e| error!("Uncaptured WebGPU device error: {}", e));
-
         // Configure the surface for rendering:
         let surface_config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
@@ -148,6 +151,58 @@ impl GuiDisplay {
         };
         surface.configure(&device, &surface_config);
 
+        // Load spectrum shader
+        let spectrum_shader = device.create_shader_module(&ShaderModuleDescriptor {
+            label: Some("Spectrum shader"),
+            source: ShaderSource::Wgsl(include_str!("spectrum.wgsl").into()),
+        });
+
+        // Set up spectrum pipeline layout
+        let spectrum_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Spectrum pipeline layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+
+        // Set up spectrum render pipeline
+        let spectrum_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("Spectrum pipeline"),
+            layout: Some(&spectrum_pipeline_layout),
+            vertex: VertexState {
+                module: &spectrum_shader,
+                entry_point: "vertex",
+                buffers: &[],
+            },
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: Some(Face::Back),
+                unclipped_depth: false,
+                polygon_mode: PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            // TODO: Enable MSAA
+            multisample: MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(FragmentState {
+                module: &spectrum_shader,
+                entry_point: "fragment",
+                targets: &[ColorTargetState {
+                    format: surface_config.format,
+                    // TODO: Enable alpha blending once we went to
+                    //       render older spectra with a blur effect
+                    blend: Some(BlendState::REPLACE),
+                    write_mask: ColorWrites::ALL,
+                }],
+            }),
+            multiview: None,
+        });
+
         // ...and we're ready!
         Ok(Self {
             event_loop: Some(event_loop),
@@ -156,6 +211,7 @@ impl GuiDisplay {
             surface_config,
             device,
             queue,
+            spectrum_pipeline,
         })
     }
 
@@ -323,9 +379,9 @@ impl GuiDisplay {
                 label: Some("Spectrum render encoder"),
             });
 
-        // Set up a render pass with a black clear color
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            // Set up a render pass with a black clear color
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Spectrum render Pass"),
                 color_attachments: &[wgpu::RenderPassColorAttachment {
                     view: &window_view,
@@ -342,9 +398,14 @@ impl GuiDisplay {
                 }],
                 depth_stencil_attachment: None,
             });
-        }
 
-        // TODO: Render the spectrum data here
+            // Draw the live spectrum
+            // TODO: Add more instances for older spectra
+            render_pass.set_pipeline(&self.spectrum_pipeline);
+            render_pass.draw(0..4, 0..1);
+
+            // TODO: Render a spectrogram too
+        }
 
         // Submit our render command
         self.queue.submit(Some(encoder.finish()));
