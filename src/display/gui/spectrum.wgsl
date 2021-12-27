@@ -55,7 +55,7 @@ var spectrum_texture: texture_1d<f32>;
 
 // Spectrogram texture
 [[ group(1), binding(1) ]]
-var spectrogram_texture: texture_storage_2d<rgba32float, write>;
+var spectrogram_texture: texture_storage_2d<rgba16float, write>;
 
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {

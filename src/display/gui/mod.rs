@@ -80,7 +80,7 @@ pub struct GuiDisplay {
     /// Buffer for holding UI settings on the device
     settings_buffer: Buffer,
 
-    /// Bind group for things that are never rebound (sampler, UI settings)
+    /// Bind group for things that are never rebound (basic sampler, UI settings)
     static_bind_group: BindGroup,
 
     /// Live spectrum texture
@@ -103,6 +103,18 @@ pub struct GuiDisplay {
 
     /// Live spectrum render pipeline
     spectrum_pipeline: RenderPipeline,
+
+    /// Bind group for spectrogram things that are never rebound
+    spectrogram_static_bind_group: BindGroup,
+
+    /// Spectrogram bind group that depends on the window size
+    spectrogram_sized_bind_group: BindGroup,
+
+    /// Spectrogram size-sensitive bind group layout (to recreate bind group on resize)
+    spectrogram_sized_bind_group_layout: BindGroupLayout,
+
+    /// Spectrogram render pipeline
+    spectrogram_pipeline: RenderPipeline,
 
     /// Transit buffer for casting spectrum magnitudes to single precision
     half_spectrum_data: Box<[f16]>,
@@ -258,9 +270,9 @@ impl GuiDisplay {
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
-        // Set up spectrum and spectrogram texture sampling
-        let sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some("Spectrum & spectrogram sampler"),
+        // Set up spectrum texture sampling
+        let spectrum_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("Spectrum sampler"),
             address_mode_u: AddressMode::ClampToEdge,
             address_mode_v: AddressMode::ClampToEdge,
             mag_filter: FilterMode::Linear,
@@ -349,7 +361,7 @@ impl GuiDisplay {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::Sampler(&sampler),
+                    resource: BindingResource::Sampler(&spectrum_sampler),
                 },
                 BindGroupEntry {
                     binding: 2,
@@ -384,8 +396,8 @@ impl GuiDisplay {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba32Float,
-            usage: TextureUsages::STORAGE_BINDING,
+            format: TextureFormat::Rgba16Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
         };
 
         // Define the live spectrum size-sensitive bind group layout
@@ -408,7 +420,7 @@ impl GuiDisplay {
                         visibility: ShaderStages::FRAGMENT,
                         ty: BindingType::StorageTexture {
                             access: StorageTextureAccess::WriteOnly,
-                            format: TextureFormat::Rgba32Float,
+                            format: TextureFormat::Rgba16Float,
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -465,14 +477,118 @@ impl GuiDisplay {
             multiview: None,
         });
 
-        // Set up spectrum texture and associated bind group
-        let (spectrum_texture, spectrogram_texture, spectrum_sized_bind_group) =
-            Self::configure_spectrum_sized_bind_group(
-                &device,
-                &spectrum_texture_desc,
-                &spectrogram_texture_desc,
-                &spectrum_sized_bind_group_layout,
-            );
+        // Set up spectrogram texture sampling
+        let spectrogram_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("Spectrogram sampler"),
+            address_mode_u: AddressMode::Repeat,
+            address_mode_v: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            ..Default::default()
+        });
+        //
+        let spectrogram_static_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Spectrogram static bind group layout"),
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                }],
+            });
+        //
+        let spectrogram_static_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrogram static bind group"),
+            layout: &spectrogram_static_bind_group_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::Sampler(&spectrogram_sampler),
+            }],
+        });
+
+        // Define the live spectrum size-sensitive bind group layout
+        let spectrogram_sized_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Spectrogram size-sensitive bind group layout"),
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+            });
+
+        // Load spectrogram shader
+        let spectrogram_shader = device.create_shader_module(&ShaderModuleDescriptor {
+            label: Some("Spectrogram shader"),
+            source: ShaderSource::Wgsl(include_str!("spectrogram.wgsl").into()),
+        });
+
+        // Set up spectrum pipeline layout
+        let spectrogram_pipeline_layout =
+            device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("Spectrogram pipeline layout"),
+                bind_group_layouts: &[
+                    &static_bind_group_layout,
+                    &spectrogram_static_bind_group_layout,
+                    &spectrogram_sized_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+
+        // Set up spectrum render pipeline
+        let spectrogram_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("Spectrogram pipeline"),
+            layout: Some(&spectrogram_pipeline_layout),
+            vertex: VertexState {
+                module: &spectrogram_shader,
+                entry_point: "vertex",
+                buffers: &[],
+            },
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: Some(Face::Back),
+                unclipped_depth: false,
+                polygon_mode: PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(FragmentState {
+                module: &spectrogram_shader,
+                entry_point: "fragment",
+                targets: &[ColorTargetState {
+                    format: surface_config.format,
+                    blend: Some(BlendState::REPLACE),
+                    write_mask: ColorWrites::ALL,
+                }],
+            }),
+            multiview: None,
+        });
+
+        // Set up size-dependent textures and bind groups
+        let (
+            spectrum_texture,
+            spectrogram_texture,
+            spectrum_sized_bind_group,
+            spectrogram_sized_bind_group,
+        ) = Self::configure_sized_bind_groups(
+            &device,
+            &spectrum_texture_desc,
+            &spectrogram_texture_desc,
+            &spectrum_sized_bind_group_layout,
+            &spectrogram_sized_bind_group_layout,
+        );
 
         // Set up half-precision spectrum data
         let half_spectrum_data = std::iter::repeat(f16::default())
@@ -502,6 +618,10 @@ impl GuiDisplay {
             spectrum_sized_bind_group,
             spectrum_sized_bind_group_layout,
             spectrum_pipeline,
+            spectrogram_static_bind_group,
+            spectrogram_sized_bind_group,
+            spectrogram_sized_bind_group_layout,
+            spectrogram_pipeline,
             half_spectrum_data,
             scale_factor,
             spectrogram_refresh_period,
@@ -688,6 +808,11 @@ impl GuiDisplay {
             self.spectrum_texture_desc.size,
         );
 
+        // Move spectrogram forward if enough time elapsed
+        if self.last_spectrogram_refresh.elapsed() >= self.spectrogram_refresh_period {
+            self.last_spectrogram_idx = (self.last_spectrogram_idx + 1) % self.surface_config.width;
+        }
+
         {
             // Set up a render pass with a black clear color
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -708,25 +833,39 @@ impl GuiDisplay {
                 depth_stencil_attachment: None,
             });
 
-            // Bind common data to bind group 0
-            render_pass.set_bind_group(0, &self.static_bind_group, &[]);
-
-            // Bind size-sensitive live spectrum data to bind group 1
-            render_pass.set_bind_group(1, &self.spectrum_sized_bind_group, &[]);
-
             // Draw the live spectrum
-            // TODO: Add more instances for older spectra
+            render_pass.set_bind_group(0, &self.static_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.spectrum_sized_bind_group, &[]);
             render_pass.set_pipeline(&self.spectrum_pipeline);
-            if self.last_spectrogram_refresh.elapsed() >= self.spectrogram_refresh_period {
-                self.last_spectrogram_idx =
-                    (self.last_spectrogram_idx + 1) % self.surface_config.width;
-            }
             render_pass.draw(
                 0..4,
                 self.last_spectrogram_idx..self.last_spectrogram_idx + 1,
             );
+        }
+        {
+            // Set up a render pass with a black clear color
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Spectrogram render Pass"),
+                color_attachments: &[wgpu::RenderPassColorAttachment {
+                    view: &window_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: None,
+            });
 
-            // TODO: Render a spectrogram too
+            // Draw the spectrogram
+            render_pass.set_bind_group(0, &self.static_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.spectrogram_static_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.spectrogram_sized_bind_group, &[]);
+            render_pass.set_pipeline(&self.spectrogram_pipeline);
+            render_pass.draw(
+                0..4,
+                self.last_spectrogram_idx..self.last_spectrogram_idx + 1,
+            );
         }
 
         // Submit our render command
@@ -752,18 +891,25 @@ impl GuiDisplay {
         self.spectrum_texture_desc.size.width = self.surface_config.height as _;
         self.spectrogram_texture_desc.size.width = self.surface_config.width as _;
         self.spectrogram_texture_desc.size.height = self.surface_config.height as _;
-        let (spectrum_texture, spectrogram_texture, spectrum_sized_bind_group) =
-            Self::configure_spectrum_sized_bind_group(
-                &self.device,
-                &self.spectrum_texture_desc,
-                &self.spectrogram_texture_desc,
-                &self.spectrum_sized_bind_group_layout,
-            );
+        let (
+            spectrum_texture,
+            spectrogram_texture,
+            spectrum_sized_bind_group,
+            spectrogram_sized_bind_group,
+        ) = Self::configure_sized_bind_groups(
+            &self.device,
+            &self.spectrum_texture_desc,
+            &self.spectrogram_texture_desc,
+            &self.spectrum_sized_bind_group_layout,
+            &self.spectrogram_sized_bind_group_layout,
+        );
         self.spectrum_texture = spectrum_texture;
         // TODO: Don't just drop the old spectrogram data, resample
-        //       it with a compute shader for nicer UX
+        //       it with a compute shader for nicer UX. This will almost
+        //       certainly require setting new usage flags in the descriptor.
         self.spectrogram_texture = spectrogram_texture;
         self.spectrum_sized_bind_group = spectrum_sized_bind_group;
+        self.spectrogram_sized_bind_group = spectrogram_sized_bind_group;
 
         // Recreate half-precision spectrum data buffer
         self.half_spectrum_data = std::iter::repeat(f16::default())
@@ -774,13 +920,14 @@ impl GuiDisplay {
         self.last_spectrogram_idx = self.last_spectrogram_idx.min(self.surface_config.width - 1);
     }
 
-    /// (Re)configure spectrum texture and bind group
-    fn configure_spectrum_sized_bind_group(
+    /// (Re)configure size-dependent textures and bind groups
+    fn configure_sized_bind_groups(
         device: &Device,
         spectrum_texture_desc: &TextureDescriptor,
         spectrogram_texture_desc: &TextureDescriptor,
         spectrum_sized_bind_group_layout: &BindGroupLayout,
-    ) -> (Texture, Texture, BindGroup) {
+        spectrogram_sized_bind_group_layout: &BindGroupLayout,
+    ) -> (Texture, Texture, BindGroup, BindGroup) {
         let spectrum_texture = device.create_texture(&spectrum_texture_desc);
         let spectrum_texture_view = spectrum_texture.create_view(&TextureViewDescriptor {
             label: Some("Spectrum texture view"),
@@ -805,10 +952,19 @@ impl GuiDisplay {
                 },
             ],
         });
+        let spectrogram_sized_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrogram size-sensitive bind group"),
+            layout: &spectrogram_sized_bind_group_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::TextureView(&spectrogram_texture_view),
+            }],
+        });
         (
             spectrum_texture,
             spectrogram_texture,
             spectrum_sized_bind_group,
+            spectrogram_sized_bind_group,
         )
     }
 }
