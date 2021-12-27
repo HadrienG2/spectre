@@ -196,8 +196,8 @@ impl GuiDisplay {
             }) => {}
             Some(PhysicalSize { width, height }) => {
                 let max_size = width.max(height);
-                limits.max_texture_dimension_1d = max_size;
-                limits.max_texture_dimension_2d = max_size;
+                limits.max_texture_dimension_1d = limits.max_texture_dimension_1d.max(max_size);
+                limits.max_texture_dimension_2d = limits.max_texture_dimension_2d.max(max_size);
             }
         }
         debug!("Want a device that goes up to {:#?}", limits);

@@ -68,5 +68,6 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     //       instance number to be just right for this to work.
 
     // Live spectrum pixels are yellow
+    // TODO: Try using the palette color to see how it looks like
     return vec4<f32>(1.0, 1.0, 0.0, 1.0);
 }
