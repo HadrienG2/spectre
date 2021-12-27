@@ -32,6 +32,12 @@ use winit::{
 const DEFAULT_SPECTRUM_WIDTH: f32 = 0.3;
 
 /// Uniform for passing UI settings to GPU shaders
+//
+// NOTE: According to the Learn WGPU tutorial...
+//       "To make uniform buffers portable they have to be std140 and not
+//       std430. Uniform structs have to be std140. Storage structs have to be
+//       std430. Storage buffers for compute shaders can be std140 or std430."
+//
 #[derive(AsStd140)]
 struct SettingsUniform {
     /// Horizontal fraction of the window that is occupied by the live spectrum
