@@ -4,19 +4,22 @@ use crate::{
     display::{FrameInput, FrameResult},
     Result,
 };
+use crevice::std140::{AsStd140, Std140};
 use half::f16;
 use log::{debug, error, info, trace};
+use std::num::NonZeroU64;
 use wgpu::{
+    util::{BufferInitDescriptor, DeviceExt},
     AddressMode, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, BlendState,
-    ColorTargetState, ColorWrites, Device, DeviceDescriptor, Extent3d, Face, Features, FilterMode,
-    FragmentState, FrontFace, ImageDataLayout, Instance, Limits, MultisampleState,
-    PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState,
-    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions,
-    SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    Surface, SurfaceConfiguration, SurfaceError, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
-    VertexState,
+    Buffer, BufferBinding, BufferBindingType, BufferUsages, ColorTargetState, ColorWrites, Device,
+    DeviceDescriptor, Extent3d, Face, Features, FilterMode, FragmentState, FrontFace,
+    ImageDataLayout, Instance, Limits, MultisampleState, PipelineLayoutDescriptor, PolygonMode,
+    PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPipeline,
+    RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType, SamplerDescriptor,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, Surface, SurfaceConfiguration,
+    SurfaceError, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+    TextureUsages, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -24,6 +27,19 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+
+/// Default fraction of the window used by the live spectrum
+const DEFAULT_SPECTRUM_WIDTH: f32 = 0.3;
+
+/// Uniform for passing UI settings to GPU shaders
+#[derive(AsStd140)]
+struct SettingsUniform {
+    /// Horizontal fraction of the window that is occupied by the live spectrum
+    spectrum_width: f32,
+
+    /// Range of amplitudes that we can display in dB
+    amp_scale: f32,
+}
 
 /// GPU-accelerated spectrum display
 pub struct GuiDisplay {
@@ -45,8 +61,15 @@ pub struct GuiDisplay {
     /// Queue for submitting work to the GPU device
     queue: Queue,
 
-    /// Live spectrum render pipeline
-    spectrum_pipeline: RenderPipeline,
+    /// UI settings
+    // TODO: Once we start to update this, remember to upload into settings_buffer
+    settings: SettingsUniform,
+
+    /// Buffer for holding UI settings on the device
+    settings_buffer: Buffer,
+
+    /// Bind group for things that are never rebound (sampler, UI settings)
+    static_bind_group: BindGroup,
 
     /// Live spectrum texture
     spectrum_texture: Texture,
@@ -60,8 +83,8 @@ pub struct GuiDisplay {
     /// Live spectrum size-sensitive bind group layout (to recreate bind group on resize)
     spectrum_sized_bind_group_layout: BindGroupLayout,
 
-    /// Spectrum & spectrogram sampling bind group
-    sampler_bind_group: BindGroup,
+    /// Live spectrum render pipeline
+    spectrum_pipeline: RenderPipeline,
 
     /// Transit buffer for casting spectrum magnitudes to single precision
     half_spectrum_data: Box<[f16]>,
@@ -193,6 +216,18 @@ impl GuiDisplay {
         };
         surface.configure(&device, &surface_config);
 
+        // Set up UI settings uniform
+        let settings = SettingsUniform {
+            spectrum_width: DEFAULT_SPECTRUM_WIDTH,
+            amp_scale,
+        };
+        //
+        let settings_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("UI settings uniform"),
+            contents: settings.as_std140().as_bytes(),
+            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+        });
+
         // Set up spectrum and spectrogram texture sampling
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("Spectrum & spectrogram sampler"),
@@ -201,25 +236,50 @@ impl GuiDisplay {
             mag_filter: FilterMode::Linear,
             ..Default::default()
         });
-        //
-        let sampler_bind_group_layout =
+
+        // Set up the common bind group for things that don't need rebinding
+        let static_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("Spectrum & spectrogram sampler bind group layout"),
-                entries: &[BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                }],
+                label: Some("Spectrum & spectrogram static bind group layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::VERTEX_FRAGMENT,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: NonZeroU64::new(
+                                std::mem::size_of::<SettingsUniform>() as u64,
+                            ),
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
             });
         //
-        let sampler_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Spectrum & spectrogram sampler bind group"),
-            layout: &sampler_bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: BindingResource::Sampler(&sampler),
-            }],
+        let static_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrum & spectrogram static bind group"),
+            layout: &static_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: &settings_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&sampler),
+                },
+            ],
         });
 
         // Set up a texture to hold live spectrum data
@@ -269,10 +329,7 @@ impl GuiDisplay {
         // Set up spectrum pipeline layout
         let spectrum_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Spectrum pipeline layout"),
-            bind_group_layouts: &[
-                &sampler_bind_group_layout,
-                &spectrum_sized_bind_group_layout,
-            ],
+            bind_group_layouts: &[&static_bind_group_layout, &spectrum_sized_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -336,12 +393,14 @@ impl GuiDisplay {
             surface_config,
             device,
             queue,
-            spectrum_pipeline,
+            settings,
+            settings_buffer,
+            static_bind_group,
             spectrum_texture,
             spectrum_texture_desc,
             spectrum_sized_bind_group,
             spectrum_sized_bind_group_layout,
-            sampler_bind_group,
+            spectrum_pipeline,
             half_spectrum_data,
         })
     }
@@ -543,10 +602,10 @@ impl GuiDisplay {
                 depth_stencil_attachment: None,
             });
 
-            // Bind the spectrum & spectrogram sampler to bind group 0
-            render_pass.set_bind_group(0, &self.sampler_bind_group, &[]);
+            // Bind common data to bind group 0
+            render_pass.set_bind_group(0, &self.static_bind_group, &[]);
 
-            // Bind size-sensitive quantities to bind group 1
+            // Bind size-sensitive live spectrum data to bind group 1
             render_pass.set_bind_group(1, &self.spectrum_sized_bind_group, &[]);
 
             // Draw the live spectrum

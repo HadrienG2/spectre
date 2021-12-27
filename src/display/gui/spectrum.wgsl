@@ -1,3 +1,15 @@
+struct SettingsUniform {
+    // Horizontal fraction of the window that is occupied by the live spectrum
+    // TODO: Allow adjusting this with mouse controls (with <-> mouse cursor UX)
+    spectrum_width: f32;
+
+    // Range of amplitudes that we can display
+    amp_scale: f32;
+};
+//
+[[ group(0), binding(0) ]]
+var<uniform> settings: SettingsUniform;
+
 struct VertexOutput {
     // Beware that position is given in [-1, 1] world coordinates
     // to the vertex shader, but translated into absolute screen
@@ -8,10 +20,6 @@ struct VertexOutput {
     [[location(0)]] rel_x: f32;
 };
 
-// TODO: Make this a uniform
-// TODO: Allow adjusting this with mouse controls (with <-> mouse cursor UX)
-let spectrum_width = 0.3;
-
 [[stage(vertex)]]
 fn vertex(
     [[builtin(vertex_index)]] vertex_index: u32,
@@ -20,7 +28,7 @@ fn vertex(
     // uniform-configurable subset of the screen width.
     let rel_x = f32(vertex_index % 2u);
     let rel_y = f32(vertex_index / 2u);
-    let x = -1.0 + 2.0 * spectrum_width * rel_x;
+    let x = -1.0 + 2.0 * settings.spectrum_width * rel_x;
     let y = 2.0 * rel_y - 1.0;
     return VertexOutput(
         vec4<f32>(x, y, 0.5, 1.0),
@@ -28,16 +36,13 @@ fn vertex(
     );
 }
 
-// FIXME: Make this a uniform and hook it into app config
-let amp_scale = 96.0;
-
 // Sampler for spectra and spectrograms
-[[ group(0), binding(0) ]]
+[[ group(0), binding(1) ]]
 var spectrum_sampler: sampler;
 
 // Live spectrum texture
 [[ group(1), binding(0) ]]
-var spectrum_texture: texture_1d<f32>;;
+var spectrum_texture: texture_1d<f32>;
 
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
@@ -53,7 +58,7 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_pos).x;
 
     // Only draw if current pixel is below scaled vertical amplitude
-    if (rel_amp * amp_scale > spectrum_amp) {
+    if (rel_amp * settings.amp_scale > spectrum_amp) {
         discard;
     }
 
@@ -62,10 +67,6 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     //       subsequently read by the spectrogram shader. But we need the
     //       instance number to be just right for this to work.
 
-    return vec4<f32>(
-        0.0,
-        0.5,
-        0.0,
-        1.0
-    );
+    // Live spectrum pixels are yellow
+    return vec4<f32>(1.0, 1.0, 0.0, 1.0);
 }
