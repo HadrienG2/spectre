@@ -53,33 +53,39 @@ var palette_texture: texture_1d<f32>;
 [[ group(1), binding(0) ]]
 var spectrum_texture: texture_1d<f32>;
 
+// Spectrogram texture
+[[ group(1), binding(1) ]]
+var spectrogram_texture: texture_storage_2d<rgba32float, write>;
+
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     // Compute useful quantities from interpolated vertex output
-    let pixel_pos = in.abs_pos;
     let rel_amp = -in.rel_x;
 
     // Find spectrum amplitude at current vertical position
-    // TODO: To do multiple spectra with a blur effect, pass instance
-    //       number from vertex and use to look up a texture array or 2D texture
     let spectrum_len = f32(textureDimensions(spectrum_texture));
-    let spectrum_pos = (spectrum_len - in.abs_pos.y) / spectrum_len;
-    let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_pos).x;
+    let spectrum_abs_pos = spectrum_len - in.abs_pos.y - 1.0;
+    let spectrum_rel_pos = spectrum_abs_pos / (spectrum_len - 1.0);
+    let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_rel_pos).x;
     let spectrum_color = textureSample(
         palette_texture,
         spectrum_sampler,
         1.0 + spectrum_amp/settings.amp_scale
     );
 
+    // Record the spectrum color in the spectrogram image
+    if (in.abs_pos.x < 1.0) {
+        textureStore(
+            spectrogram_texture,
+            vec2<i32>(i32(in.instance_index), i32(spectrum_abs_pos)),
+            spectrum_color
+        );
+    }
+
     // Only draw if current pixel is below scaled vertical amplitude
     if (rel_amp * settings.amp_scale > spectrum_amp) {
         discard;
     }
-
-    // TODO: To prepare a spectrogram, the first fragment shader instance can
-    //       just write the shaded data into a storage image that will be
-    //       subsequently read by the spectrogram shader. But we need the
-    //       instance index to be just right for this to work.
 
     // Display the live spectrum using our color palette for each line
     return spectrum_color;
