@@ -1,6 +1,6 @@
 struct VertexOutput {
     // Beware that position is given in [-1, 1] world coordinates
-    // by the vertex shader, but translated into absolute screen
+    // to the vertex shader, but translated into absolute screen
     // coordinates in pixels for the fragment shader.
     [[builtin(position)]] abs_pos: vec4<f32>;
 
@@ -47,7 +47,7 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
 
     // Find spectrum amplitude at current vertical position
     // TODO: To do multiple spectra with a blur effect, pass instance
-    //       number from vertex and use it to look up a texture array
+    //       number from vertex and use to look up a texture array or 2D texture
     let spectrum_len = f32(textureDimensions(spectrum_texture));
     let spectrum_pos = (spectrum_len - in.abs_pos.y) / spectrum_len;
     let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_pos).x;

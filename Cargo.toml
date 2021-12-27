@@ -10,11 +10,13 @@ edition = "2021"
 # To build only the CLI libs, pass --no-default-features --features cli to Cargo
 default = ["gui"]
 cli = ["crossterm"]
-gui = ["bytemuck", "half", "pollster", "wgpu", "winit"]
+gui = ["bytemuck", "colorous", "crevice", "half", "pollster", "wgpu", "winit"]
 
 [dependencies]
 anyhow = "1.0"
 bytemuck = { version = "1.7", optional = true }
+colorous = { version = "1.0", optional = true }
+crevice = { version = "0.8", optional = true }
 crossterm = { version = "0.22", optional = true }
 ctrlc = "3.2"
 env_logger = "0.9"
