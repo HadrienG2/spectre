@@ -40,6 +40,10 @@ fn vertex(
 [[ group(0), binding(1) ]]
 var spectrum_sampler: sampler;
 
+// Spectrum color palette
+[[ group(0), binding(2) ]]
+var palette_texture: texture_1d<f32>;
+
 // Live spectrum texture
 [[ group(1), binding(0) ]]
 var spectrum_texture: texture_1d<f32>;
@@ -56,6 +60,11 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     let spectrum_len = f32(textureDimensions(spectrum_texture));
     let spectrum_pos = (spectrum_len - in.abs_pos.y) / spectrum_len;
     let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_pos).x;
+    let spectrum_color = textureSample(
+        palette_texture,
+        spectrum_sampler,
+        1.0 + spectrum_amp/settings.amp_scale
+    );
 
     // Only draw if current pixel is below scaled vertical amplitude
     if (rel_amp * settings.amp_scale > spectrum_amp) {
@@ -67,7 +76,6 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     //       subsequently read by the spectrogram shader. But we need the
     //       instance number to be just right for this to work.
 
-    // Live spectrum pixels are yellow
-    // TODO: Try using the palette color to see how it looks like
-    return vec4<f32>(1.0, 1.0, 0.0, 1.0);
+    // Display the live spectrum using our color palette for each line
+    return spectrum_color;
 }

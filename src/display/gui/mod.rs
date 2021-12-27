@@ -4,6 +4,7 @@ use crate::{
     display::{FrameInput, FrameResult},
     Result,
 };
+use colorous::{Color, INFERNO};
 use crevice::std140::{AsStd140, Std140};
 use half::f16;
 use log::{debug, error, info, trace};
@@ -29,7 +30,7 @@ use winit::{
 };
 
 /// Default fraction of the window used by the live spectrum
-const DEFAULT_SPECTRUM_WIDTH: f32 = 0.3;
+const DEFAULT_SPECTRUM_WIDTH: f32 = 0.25;
 
 /// Uniform for passing UI settings to GPU shaders
 //
@@ -243,6 +244,38 @@ impl GuiDisplay {
             ..Default::default()
         });
 
+        // Set up spectrum and spectrogram color palette
+        let palette_len = device.limits().max_texture_dimension_1d;
+        let palette_data = (0..palette_len as usize)
+            .flat_map(|idx| {
+                let Color { r, g, b } = INFERNO.eval_rational(idx, palette_len as usize);
+                [r, g, b, 255]
+            })
+            .collect::<Box<[_]>>();
+        //
+        let palette_texture = device.create_texture_with_data(
+            &queue,
+            &TextureDescriptor {
+                label: Some("Palette texture"),
+                size: Extent3d {
+                    width: palette_len,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING,
+            },
+            &palette_data[..],
+        );
+        //
+        let palette_texture_view = palette_texture.create_view(&TextureViewDescriptor {
+            label: Some("Palette texture view"),
+            ..Default::default()
+        });
+
         // Set up the common bind group for things that don't need rebinding
         let static_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -266,6 +299,16 @@ impl GuiDisplay {
                         ty: BindingType::Sampler(SamplerBindingType::Filtering),
                         count: None,
                     },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D1,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
                 ],
             });
         //
@@ -284,6 +327,10 @@ impl GuiDisplay {
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::Sampler(&sampler),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&palette_texture_view),
                 },
             ],
         });
