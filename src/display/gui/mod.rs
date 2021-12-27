@@ -1,4 +1,5 @@
 //! WebGPU-based spectrum display
+// FIXME: This module is getting very long and should be split into smaller entities
 
 use crate::{
     display::{FrameInput, FrameResult},
@@ -604,9 +605,8 @@ impl GuiDisplay {
                 return Ok(());
             }
 
-            // Other errors are presumed to be serious ones and kill the app
-            #[allow(unreachable_patterns)]
-            Err(e @ (SurfaceError::OutOfMemory | _)) => Err(e)?,
+            // Other errors are presumed to be serious ones and kill the app*
+            Err(e @ SurfaceError::OutOfMemory) => Err(e)?,
         };
 
         // Acquire a texture view (needed for render passes)
