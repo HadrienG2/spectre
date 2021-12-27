@@ -9,7 +9,7 @@ struct VertexOutput {
 };
 
 // TODO: Make this a uniform
-// TODO: Allow adjusting this with mouse controls
+// TODO: Allow adjusting this with mouse controls (with <-> mouse cursor UX)
 let spectrum_width = 0.3;
 
 [[stage(vertex)]]
@@ -37,8 +37,12 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     // TODO: Replace this sine with a 1D amplitude texture
     //       Be sure to lookup at textureDimensions(t) - pixel_pos.y
     //       so that the highest frequencies are on top.
-    //       To do multiple spectra with a blur effect, pass instance
+    // TODO: To do multiple spectra with a blur effect, pass instance
     //       number from vertex and use it to look up a texture array
+    // TODO: To prepare a spectrogram, the first fragment shader instance can
+    //       just write the shaded data into a storage image that will be
+    //       subsequently read by the spectrogram shader. But we need the
+    //       instance number to be just right for this to work.
     let pi = acos(-1.0);
     if (rel_amp > 0.3 * sin(2.0 * pi * pixel_pos.y / 100.0) + 0.5) {
         discard;

@@ -137,17 +137,17 @@ fn main() -> Result<()> {
 
     // Prepare to resample the Fourier transform for display purposes
     let fourier_len = fourier.output_len();
-    let setup_resampler = move |display_width| {
+    let setup_resampler = move |display_len| {
         FourierResampler::new(
             fourier_len,
             sample_rate,
-            display_width,
+            display_len,
             opts.min_freq,
             opts.max_freq,
             !opts.lin_freqs,
         )
     };
-    let mut resampler = setup_resampler(spectrum_display.width());
+    let mut resampler = setup_resampler(spectrum_display.spectrum_len());
 
     // Handle user shutdown requests (Ctrl+C)
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -163,8 +163,8 @@ fn main() -> Result<()> {
         }
 
         // Check if the display width has changed, recreate resampler if need be
-        if let Some(new_display_width) = frame_input.new_display_width {
-            resampler = setup_resampler(new_display_width);
+        if let Some(new_spectrum_len) = frame_input.new_spectrum_len {
+            resampler = setup_resampler(new_spectrum_len);
         }
 
         // Read latest audio history, handle xruns and audio thread errors

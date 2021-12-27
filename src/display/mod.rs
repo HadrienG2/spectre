@@ -13,8 +13,8 @@ pub use gui::GuiDisplay;
 
 /// Input of the frame display hook
 pub struct FrameInput {
-    /// New display width value (if any)
-    pub new_display_width: Option<usize>,
+    /// New spectrum length (if any)
+    pub new_spectrum_len: Option<usize>,
 }
 
 /// Output of the frame display hook

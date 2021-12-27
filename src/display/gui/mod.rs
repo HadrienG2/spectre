@@ -6,12 +6,13 @@ use crate::{
 };
 use log::{debug, error, info, trace};
 use wgpu::{
-    Backends, BlendState, ColorTargetState, ColorWrites, Device, DeviceDescriptor, Face, Features,
-    FragmentState, FrontFace, Instance, Limits, MultisampleState, PipelineLayoutDescriptor,
-    PolygonMode, PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue,
-    RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor,
-    ShaderSource, Surface, SurfaceConfiguration, SurfaceError, TextureUsages,
-    TextureViewDescriptor, VertexState,
+    Backends, BlendState, ColorTargetState, ColorWrites, Device, DeviceDescriptor, Extent3d, Face,
+    Features, FragmentState, FrontFace, ImageDataLayout, Instance, Limits, MultisampleState,
+    PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState,
+    PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions,
+    ShaderModuleDescriptor, ShaderSource, Surface, SurfaceConfiguration, SurfaceError, Texture,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
+    VertexState,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -31,7 +32,7 @@ pub struct GuiDisplay {
     /// Associated GPU surface
     surface: Surface,
 
-    /// GPU surface configuration
+    /// GPU surface configuration (to recreate it when e.g. window is resized)
     surface_config: SurfaceConfiguration,
 
     /// GPU device context
@@ -42,6 +43,12 @@ pub struct GuiDisplay {
 
     /// Live spectrum render pipeline
     spectrum_pipeline: RenderPipeline,
+
+    /// Live spectrum texture
+    spectrum_texture: Texture,
+
+    /// Live spectrum texture descriptor (to recreate it on window resize)
+    spectrum_texture_desc: TextureDescriptor<'static>,
 }
 //
 impl GuiDisplay {
@@ -130,16 +137,35 @@ impl GuiDisplay {
             adapter.get_texture_format_features(preferred_surface_format),
         );
 
+        // Define minimal device requirements
+        let mut limits = Limits::downlevel_defaults();
+        let monitor = window
+            .current_monitor()
+            .or(window.primary_monitor())
+            .or(window.available_monitors().next());
+        match monitor.map(|m| m.size()) {
+            None
+            | Some(PhysicalSize {
+                width: 0,
+                height: 0,
+            }) => {}
+            Some(PhysicalSize { width, height }) => {
+                let max_size = width.max(height);
+                limits.max_texture_dimension_1d = max_size;
+                limits.max_texture_dimension_2d = max_size;
+            }
+        }
+        debug!("Want a device that goes up to {:#?}", limits);
+
         // Configure device and queue
         let (device, queue) = pollster::block_on(adapter.request_device(
             &DeviceDescriptor {
                 label: Some("GPU"),
                 features: Features::empty(),
-                limits: Limits::downlevel_defaults(),
+                limits,
             },
             None,
         ))?;
-        debug!("Got a device that goes up to {:#?}", device.limits());
 
         // Configure the surface for rendering:
         let surface_config = SurfaceConfiguration {
@@ -203,6 +229,22 @@ impl GuiDisplay {
             multiview: None,
         });
 
+        // Set up a texture to hold live spectrum data
+        let spectrum_texture_desc = TextureDescriptor {
+            label: Some("Spectrum texture"),
+            size: Extent3d {
+                width: surface_config.height as _,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D1,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
+        };
+        let spectrum_texture = device.create_texture(&spectrum_texture_desc);
+
         // ...and we're ready!
         Ok(Self {
             event_loop: Some(event_loop),
@@ -212,12 +254,14 @@ impl GuiDisplay {
             device,
             queue,
             spectrum_pipeline,
+            spectrum_texture,
+            spectrum_texture_desc,
         })
     }
 
-    /// Report terminal width in pixels
-    pub fn width(&self) -> usize {
-        self.surface_config.width as _
+    /// Report desired spectrum length in bins
+    pub fn spectrum_len(&self) -> usize {
+        self.surface_config.height as _
     }
 
     /// Start the event loop, run a user-provided callback on every frame
@@ -229,7 +273,7 @@ impl GuiDisplay {
         let first_result = frame_callback(
             &mut self,
             FrameInput {
-                new_display_width: None,
+                new_spectrum_len: None,
             },
         )
         .expect("Failed to render first frame");
@@ -313,10 +357,10 @@ impl GuiDisplay {
                     //
                     Event::RedrawRequested(window_id) if window_id == self.window.id() => {
                         let mut frame_input = FrameInput {
-                            new_display_width: None,
+                            new_spectrum_len: None,
                         };
                         if resized {
-                            frame_input.new_display_width = Some(self.surface_config.width as _);
+                            frame_input.new_spectrum_len = Some(self.surface_config.height as _);
                             self.handle_resize();
                             resized = false;
                         }
@@ -379,6 +423,15 @@ impl GuiDisplay {
                 label: Some("Spectrum render encoder"),
             });
 
+        // Send the new spectrum data to the device
+        self.queue.write_texture(
+            self.spectrum_texture.as_image_copy(),
+            // FIXME: Use bytemuck
+            unsafe { std::mem::transmute(data) },
+            ImageDataLayout::default(),
+            self.spectrum_texture_desc.size,
+        );
+
         {
             // Set up a render pass with a black clear color
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -398,6 +451,8 @@ impl GuiDisplay {
                 }],
                 depth_stencil_attachment: None,
             });
+
+            // TODO: Bind
 
             // Draw the live spectrum
             // TODO: Add more instances for older spectra
@@ -423,6 +478,14 @@ impl GuiDisplay {
 
     /// Reallocate structures that depend on the window size after a resize
     fn handle_resize(&mut self) {
+        // Recreate display surface
         self.surface.configure(&self.device, &self.surface_config);
+
+        // Recreate live spectrum texture
+        self.spectrum_texture_desc.size.width = self.surface_config.height as _;
+        self.spectrum_texture = self.device.create_texture(&self.spectrum_texture_desc);
+
+        // TODO: Once we do spectrograms, don't just drop the old data, resample
+        //       it with a compute shader for nicer UX
     }
 }

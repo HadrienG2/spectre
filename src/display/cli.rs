@@ -60,8 +60,8 @@ impl CliDisplay {
         })
     }
 
-    /// Report terminal width in chars
-    pub fn width(&self) -> usize {
+    /// Report desired spectrum length in bins
+    pub fn spectrum_len(&self) -> usize {
         self.width.into()
     }
 
