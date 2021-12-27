@@ -12,8 +12,8 @@ var<uniform> settings: SettingsUniform;
 
 struct VertexOutput {
     // Beware that position is given in [-1, 1] world coordinates
-    // to the vertex shader, but translated into absolute screen
-    // coordinates in pixels for the fragment shader.
+    // by the vertex shader, but translated into absolute screen
+    // coordinates in pixels upon fragment shader invocation.
     [[builtin(position)]] abs_pos: vec4<f32>;
 
     // Relative horizontal position within the quad
