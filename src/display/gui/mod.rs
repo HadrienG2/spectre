@@ -54,11 +54,11 @@ pub struct GuiDisplay {
     /// Live spectrum texture descriptor (to recreate it on window resize)
     spectrum_texture_desc: TextureDescriptor<'static>,
 
-    /// Live spectrum texture bind group
-    spectrum_texture_bind_group: BindGroup,
+    /// Live spectrum bind group that depends on the window size
+    spectrum_sized_bind_group: BindGroup,
 
-    /// Live spectrum texture bind group layout (to recreate bind group on window resize)
-    spectrum_texture_bind_group_layout: BindGroupLayout,
+    /// Live spectrum size-sensitive bind group layout (to recreate bind group on resize)
+    spectrum_sized_bind_group_layout: BindGroupLayout,
 
     /// Spectrum & spectrogram sampling bind group
     sampler_bind_group: BindGroup,
@@ -241,10 +241,10 @@ impl GuiDisplay {
         //       be usable as a storage texture so that the live spectrum shader
         //       can write new spectrum data to it.
 
-        // Define the live spectrum pipeline's texture bind group layout
-        let spectrum_texture_bind_group_layout =
+        // Define the live spectrum size-sensitive bind group layout
+        let spectrum_sized_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("Spectrum texture bind group layout"),
+                label: Some("Spectrum size-sensitive bind group layout"),
                 entries: &[
                     BindGroupLayoutEntry {
                         binding: 0,
@@ -271,7 +271,7 @@ impl GuiDisplay {
             label: Some("Spectrum pipeline layout"),
             bind_group_layouts: &[
                 &sampler_bind_group_layout,
-                &spectrum_texture_bind_group_layout,
+                &spectrum_sized_bind_group_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -316,11 +316,11 @@ impl GuiDisplay {
         });
 
         // Set up spectrum texture and associated bind group
-        let (spectrum_texture, spectrum_texture_bind_group) =
-            Self::configure_spectrum_texture_bind_group(
+        let (spectrum_texture, spectrum_sized_bind_group) =
+            Self::configure_spectrum_sized_bind_group(
                 &device,
                 &spectrum_texture_desc,
-                &spectrum_texture_bind_group_layout,
+                &spectrum_sized_bind_group_layout,
             );
 
         // Set up half-precision spectrum data
@@ -339,8 +339,8 @@ impl GuiDisplay {
             spectrum_pipeline,
             spectrum_texture,
             spectrum_texture_desc,
-            spectrum_texture_bind_group,
-            spectrum_texture_bind_group_layout,
+            spectrum_sized_bind_group,
+            spectrum_sized_bind_group_layout,
             sampler_bind_group,
             half_spectrum_data,
         })
@@ -546,8 +546,8 @@ impl GuiDisplay {
             // Bind the spectrum & spectrogram sampler to bind group 0
             render_pass.set_bind_group(0, &self.sampler_bind_group, &[]);
 
-            // Bind the spectrum & spectrogram textures to bind group 1
-            render_pass.set_bind_group(1, &self.spectrum_texture_bind_group, &[]);
+            // Bind size-sensitive quantities to bind group 1
+            render_pass.set_bind_group(1, &self.spectrum_sized_bind_group, &[]);
 
             // Draw the live spectrum
             // TODO: Add more instances for older spectra
@@ -578,14 +578,14 @@ impl GuiDisplay {
 
         // Recreate live spectrum texture and associated bind group
         self.spectrum_texture_desc.size.width = self.surface_config.height as _;
-        let (spectrum_texture, spectrum_texture_bind_group) =
-            Self::configure_spectrum_texture_bind_group(
+        let (spectrum_texture, spectrum_sized_bind_group) =
+            Self::configure_spectrum_sized_bind_group(
                 &self.device,
                 &self.spectrum_texture_desc,
-                &self.spectrum_texture_bind_group_layout,
+                &self.spectrum_sized_bind_group_layout,
             );
         self.spectrum_texture = spectrum_texture;
-        self.spectrum_texture_bind_group = spectrum_texture_bind_group;
+        self.spectrum_sized_bind_group = spectrum_sized_bind_group;
 
         // TODO: Once we do spectrograms, don't just drop the old data, resample
         //       it with a compute shader for nicer UX
@@ -597,19 +597,19 @@ impl GuiDisplay {
     }
 
     /// (Re)configure spectrum texture and bind group
-    fn configure_spectrum_texture_bind_group(
+    fn configure_spectrum_sized_bind_group(
         device: &Device,
         spectrum_texture_desc: &TextureDescriptor,
-        spectrum_texture_bind_group_layout: &BindGroupLayout,
+        spectrum_sized_bind_group_layout: &BindGroupLayout,
     ) -> (Texture, BindGroup) {
         let spectrum_texture = device.create_texture(&spectrum_texture_desc);
         let spectrum_texture_view = spectrum_texture.create_view(&TextureViewDescriptor {
             label: Some("Spectrum texture view"),
             ..Default::default()
         });
-        let spectrum_texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Spectrum texture bind group"),
-            layout: &spectrum_texture_bind_group_layout,
+        let spectrum_sized_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrum size-sensitive bind group"),
+            layout: &spectrum_sized_bind_group_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
@@ -618,6 +618,6 @@ impl GuiDisplay {
                 // TODO: Add spectrogram as a storage image
             ],
         });
-        (spectrum_texture, spectrum_texture_bind_group)
+        (spectrum_texture, spectrum_sized_bind_group)
     }
 }
