@@ -28,6 +28,9 @@ fn vertex(
     );
 }
 
+// FIXME: Make this a uniform and hook it into app config
+let amp_scale = 96.0;
+
 // Sampler for spectra and spectrograms
 [[ group(0), binding(0) ]]
 var spectrum_sampler: sampler;
@@ -50,7 +53,7 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_pos).x;
 
     // Only draw if current pixel is below scaled vertical amplitude
-    if (rel_amp * 96.0 > spectrum_amp) {
+    if (rel_amp * amp_scale > spectrum_amp) {
         discard;
     }
 
@@ -59,10 +62,9 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     //       subsequently read by the spectrogram shader. But we need the
     //       instance number to be just right for this to work.
 
-    // TODO: Pick color from a palette texture
     return vec4<f32>(
-        rel_amp,
-        1.0 - rel_amp,
+        0.0,
+        0.5,
         0.0,
         1.0
     );

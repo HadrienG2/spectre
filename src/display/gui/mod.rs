@@ -4,6 +4,7 @@ use crate::{
     display::{FrameInput, FrameResult},
     Result,
 };
+use half::f16;
 use log::{debug, error, info, trace};
 use wgpu::{
     AddressMode, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
@@ -61,6 +62,9 @@ pub struct GuiDisplay {
 
     /// Spectrum & spectrogram sampling bind group
     sampler_bind_group: BindGroup,
+
+    /// Transit buffer for casting spectrum magnitudes to single precision
+    half_spectrum_data: Box<[f16]>,
 }
 //
 impl GuiDisplay {
@@ -229,7 +233,7 @@ impl GuiDisplay {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D1,
-            format: TextureFormat::R32Float,
+            format: TextureFormat::R16Float,
             usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
         };
 
@@ -319,6 +323,11 @@ impl GuiDisplay {
                 &spectrum_texture_bind_group_layout,
             );
 
+        // Set up half-precision spectrum data
+        let half_spectrum_data = std::iter::repeat(f16::default())
+            .take(surface_config.height as _)
+            .collect();
+
         // ...and we're ready!
         Ok(Self {
             event_loop: Some(event_loop),
@@ -333,6 +342,7 @@ impl GuiDisplay {
             spectrum_texture_bind_group,
             spectrum_texture_bind_group_layout,
             sampler_bind_group,
+            half_spectrum_data,
         })
     }
 
@@ -500,11 +510,15 @@ impl GuiDisplay {
                 label: Some("Spectrum render encoder"),
             });
 
+        // Convert the new spectrum data to half precision
+        for (dest, &src) in self.half_spectrum_data.iter_mut().zip(data) {
+            *dest = f16::from_f32(src);
+        }
+
         // Send the new spectrum data to the device
         self.queue.write_texture(
             self.spectrum_texture.as_image_copy(),
-            // FIXME: Use bytemuck
-            unsafe { std::mem::transmute(data) },
+            bytemuck::cast_slice(&self.half_spectrum_data[..]),
             ImageDataLayout::default(),
             self.spectrum_texture_desc.size,
         );
@@ -575,6 +589,11 @@ impl GuiDisplay {
 
         // TODO: Once we do spectrograms, don't just drop the old data, resample
         //       it with a compute shader for nicer UX
+
+        // Recreate half-precision spectrum data buffer
+        self.half_spectrum_data = std::iter::repeat(f16::default())
+            .take(self.surface_config.height as _)
+            .collect();
     }
 
     /// (Re)configure spectrum texture and bind group
