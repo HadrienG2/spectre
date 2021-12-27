@@ -11,8 +11,6 @@
 
 ### Thread graphique/événements
 
-* S'exécute à chaque cycle de rafraîchissement de l'API graphique utilisée
-  (probablement via wgpu + winit). Plus généralement, fait gestionnaire d'evts.
 * Récupère les données du thread DSP dans sa "ring matrix" interne, de la taille
   de la longueur de l'historique affiché à l'écran en pixels, et les marque
   comme lues pour le thread DSP.
@@ -25,10 +23,6 @@
     * Accède à la texture des amplitudes FFT en échelle log.
     * Traduit les amplitudes en couleurs via une fonction palette.
     * _Après la v1, essayer de ne rafraîchir que ce qui a changé._
-* Par-dessus, faire le plot du dernier spectre en date avec des lignes
-  antialiasées (cf exemples wgpu pour une idée).
-* Commencer par hardcoder une échelle verticale raisonnable : 0dBm au max
-  à `-20*bit_depth*log(2)` au min.
 * _En-dehors des événements graphiques, gèrera à terme les événements associés
   aux interactions utilisateur, par exemple on pourrait imaginer que quand on
   appuie sur "+", ça augmente la résolution temporelle en augmentant la
@@ -50,16 +44,6 @@
 
 ## Planif développement
 
-* [ ] Thread graphique (RT!) qui fait un plot de cette dernière FFT en
-  date à chaque événement de refresh écran via des lignes antialiasées en jaune
-  sur fond noir. Dans un premier temps, on affiche tous les bins en échelle
-  linéaire, sans légende, avec une échelle verticale hardcodée en const, et on
-  prend toute la fenêtre. On devrait pouvoir s'inspirer très directement de
-  l'exemple de lignes antialiasées de wgpu. Modifier la fréquence du thread DSP
-  pour être un multiple ou un sous-multiple de la fréquence de rafraîchissement
-  graphique.
-    * Validation: Comme avant, mais avec la visu graphique plutôt qu'un thread
-      console supplémentaire.
 * [ ] Passage à une échelle horizontale log contrôlé par une constante
   (à la base hardcodée via une const), puis ajout de légendes horizontales et
   verticales et d'une grille de pas en pixel raisonnable. Restriction des bins
@@ -89,18 +73,6 @@
   rafraîchissement intégral à chaque cycle. Approche à base de quad rendu par un
   fragment shader selon texture correspondant à l'historique d'amplitude FFT.
     * Validation: Test sur signaux audio synthétiques d'amsynth.
-* [ ] Meilleure palette de couleur (utiliser palette `INFERNO` tirée
-  de matplotlib via la crate `colorous`), rafraîchissement restreint aux
-  nouvelles données, et support de l'échelle log dans le spectrogramme via un
-  fragment shader plus intelligent.
-    * Validation: Test sur signaux audio synthétiques d'amsynth.
-* [ ] Supporter le redimensionnement de la fenêtre sans perdre le
-  caractère RT du thread graphique: les nouvelles allocations de mémoire vidéo
-  sont faires par un thread séparé et remplacées à la volée par un algo qui est
-  lock-free pour le thread graphique. Attention à la libération mémoire qui
-  doit attendre que le thread graphique ait fini (mais je crois que wgpu le
-  gère en standard).
-    * Validation: Test sur signaux audio synthétiques, redim. la fenêtre.
 * [ ] Progressivement rendre des paramètres const ajustables à la
   volée par des raccourcis clavier, sans perdre la RT-safety (ex: les
   allocations mémoire sont faites par un thread séparé et remplacées à la volée
