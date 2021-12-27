@@ -18,11 +18,15 @@ struct VertexOutput {
 
     // Relative horizontal position within the quad
     [[location(0)]] rel_x: f32;
+
+    // Instance index
+    [[location(1)]] instance_index: u32;
 };
 
 [[stage(vertex)]]
 fn vertex(
     [[builtin(vertex_index)]] vertex_index: u32,
+    [[builtin(instance_index)]] instance_index: u32,
 ) -> VertexOutput {
     // Emit a quad that covers the full screen height and a
     // uniform-configurable subset of the screen width.
@@ -33,6 +37,7 @@ fn vertex(
     return VertexOutput(
         vec4<f32>(x, y, 0.5, 1.0),
         rel_x,
+        instance_index
     );
 }
 
@@ -74,7 +79,7 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     // TODO: To prepare a spectrogram, the first fragment shader instance can
     //       just write the shaded data into a storage image that will be
     //       subsequently read by the spectrogram shader. But we need the
-    //       instance number to be just right for this to work.
+    //       instance index to be just right for this to work.
 
     // Display the live spectrum using our color palette for each line
     return spectrum_color;

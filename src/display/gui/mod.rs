@@ -9,7 +9,10 @@ use colorous::{Color, INFERNO};
 use crevice::std140::{AsStd140, Std140};
 use half::f16;
 use log::{debug, error, info, trace};
-use std::num::NonZeroU64;
+use std::{
+    num::NonZeroU64,
+    time::{Duration, Instant},
+};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     AddressMode, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
@@ -96,11 +99,23 @@ pub struct GuiDisplay {
 
     /// Transit buffer for casting spectrum magnitudes to single precision
     half_spectrum_data: Box<[f16]>,
+
+    /// Last observed DPI scale factor
+    scale_factor: f64,
+
+    /// Spectrogram refresh period
+    spectrogram_refresh_period: Duration,
+
+    /// Last spectrogram column index
+    last_spectrogram_idx: u32,
+
+    /// Last spectrogram refresh timestamp
+    last_spectrogram_refresh: Instant,
 }
 //
 impl GuiDisplay {
     /// Set up the GPU display
-    pub fn new(amp_scale: f32) -> Result<Self> {
+    pub fn new(amp_scale: f32, spectrogram_refresh_rate: f32) -> Result<Self> {
         assert!(amp_scale > 0.0);
 
         // Set up event loop
@@ -438,6 +453,11 @@ impl GuiDisplay {
             .take(surface_config.height as _)
             .collect();
 
+        // Set up spectrogram refreshes
+        let scale_factor = window.scale_factor();
+        let spectrogram_refresh_period =
+            Duration::from_secs_f64(scale_factor / spectrogram_refresh_rate as f64);
+
         // ...and we're ready!
         Ok(Self {
             event_loop: Some(event_loop),
@@ -455,6 +475,10 @@ impl GuiDisplay {
             spectrum_sized_bind_group_layout,
             spectrum_pipeline,
             half_spectrum_data,
+            scale_factor,
+            spectrogram_refresh_period,
+            last_spectrogram_refresh: Instant::now(),
+            last_spectrogram_idx: 0,
         })
     }
 
@@ -521,20 +545,22 @@ impl GuiDisplay {
 
                             // Resize and DPI changes
                             WindowEvent::Resized(new_size) => {
-                                if new_size
-                                    != (PhysicalSize {
-                                        width: self.surface_config.width,
-                                        height: self.surface_config.height,
-                                    })
-                                {
-                                    self.surface_config.width = new_size.width;
-                                    self.surface_config.height = new_size.height;
-                                    resized = true;
-                                }
+                                self.surface_config.width = new_size.width;
+                                self.surface_config.height = new_size.height;
+                                resized = true;
                             }
-                            WindowEvent::ScaleFactorChanged { .. } => {
-                                // FIXME: Implement once we have stuff to scale
-                                panic!("DPI scaling is not supported yet");
+                            WindowEvent::ScaleFactorChanged {
+                                scale_factor,
+                                new_inner_size,
+                            } => {
+                                self.spectrogram_refresh_period = Duration::from_secs_f64(
+                                    self.spectrogram_refresh_period.as_secs_f64() * scale_factor
+                                        / self.scale_factor,
+                                );
+                                self.scale_factor = scale_factor;
+                                self.surface_config.width = new_inner_size.width;
+                                self.surface_config.height = new_inner_size.height;
+                                resized = true;
                             }
 
                             // Ignore chatty events we don't care about
@@ -663,7 +689,14 @@ impl GuiDisplay {
             // Draw the live spectrum
             // TODO: Add more instances for older spectra
             render_pass.set_pipeline(&self.spectrum_pipeline);
-            render_pass.draw(0..4, 0..1);
+            if self.last_spectrogram_refresh.elapsed() >= self.spectrogram_refresh_period {
+                self.last_spectrogram_idx =
+                    (self.last_spectrogram_idx + 1) % self.surface_config.width;
+            }
+            render_pass.draw(
+                0..4,
+                self.last_spectrogram_idx..self.last_spectrogram_idx + 1,
+            );
 
             // TODO: Render a spectrogram too
         }
@@ -705,6 +738,9 @@ impl GuiDisplay {
         self.half_spectrum_data = std::iter::repeat(f16::default())
             .take(self.surface_config.height as _)
             .collect();
+
+        // Make sure the spectrogram write index stays in range
+        self.last_spectrogram_idx = self.last_spectrogram_idx.min(self.surface_config.width - 1);
     }
 
     /// (Re)configure spectrum texture and bind group

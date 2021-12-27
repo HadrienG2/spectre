@@ -83,6 +83,14 @@ struct CliOpts {
     ///
     #[structopt(long, default_value = "96")]
     amp_range: f32,
+
+    /// Spectrogram refresh rate in logical pixels per second
+    ///
+    /// If this is set above the screen refresh rate, it will be capped to it.
+    ///
+    #[cfg(all(feature = "gui", not(feature = "cli")))]
+    #[structopt(long, default_value = "60")]
+    spectrogram_refresh: f32,
 }
 
 fn main() -> Result<()> {
@@ -106,6 +114,10 @@ fn main() -> Result<()> {
     }
     if !opts.amp_range.is_finite() {
         panic!("Please specify a sensible amplitude scale");
+    }
+    #[cfg(all(feature = "gui", not(feature = "cli")))]
+    if !opts.spectrogram_refresh.is_finite() || opts.spectrogram_refresh <= 0.0 {
+        panic!("Please specify a sensible spectrogram refresh rate");
     }
     opts.amp_range = opts.amp_range.abs();
 
@@ -133,7 +145,8 @@ fn main() -> Result<()> {
     #[cfg(feature = "cli")]
     let spectrum_display = crate::display::CliDisplay::new(opts.amp_range)?;
     #[cfg(all(feature = "gui", not(feature = "cli")))]
-    let spectrum_display = crate::display::GuiDisplay::new(opts.amp_range)?;
+    let spectrum_display =
+        crate::display::GuiDisplay::new(opts.amp_range, opts.spectrogram_refresh)?;
 
     // Prepare to resample the Fourier transform for display purposes
     let fourier_len = fourier.output_len();
