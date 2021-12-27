@@ -1,8 +1,8 @@
 struct VertexOutput {
     // Beware that position is given in [-1, 1] world coordinates
     // by the vertex shader, but translated into absolute screen
-    // coordinates for the fragment shader.
-    [[builtin(position)]] clip_position: vec4<f32>;
+    // coordinates in pixels for the fragment shader.
+    [[builtin(position)]] abs_pos: vec4<f32>;
 
     // Relative horizontal position within the quad
     [[location(0)]] rel_x: f32;
@@ -19,34 +19,45 @@ fn vertex(
     // Emit a quad that covers the full screen height and a
     // uniform-configurable subset of the screen width.
     let rel_x = f32(vertex_index % 2u);
+    let rel_y = f32(vertex_index / 2u);
     let x = -1.0 + 2.0 * spectrum_width * rel_x;
-    let y = 2.0 * f32(vertex_index / 2u) - 1.0;
-    let clip_position = vec4<f32>(x, y, 0.5, 1.0);
+    let y = 2.0 * rel_y - 1.0;
     return VertexOutput(
-        clip_position,
-        rel_x
+        vec4<f32>(x, y, 0.5, 1.0),
+        rel_x,
     );
 }
+
+// Sampler for spectra and spectrograms
+[[ group(0), binding(0) ]]
+var spectrum_sampler: sampler;
+
+// Live spectrum texture
+[[ group(1), binding(0) ]]
+var spectrum_texture: texture_1d<f32>;;
 
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     // Compute useful quantities from interpolated vertex output
-    let pixel_pos = in.clip_position;
-    let rel_amp = 1.0 - in.rel_x;
+    let pixel_pos = in.abs_pos;
+    let rel_amp = -in.rel_x;
 
-    // TODO: Replace this sine with a 1D amplitude texture
-    //       Be sure to lookup at textureDimensions(t) - pixel_pos.y
-    //       so that the highest frequencies are on top.
+    // Find spectrum amplitude at current vertical position
     // TODO: To do multiple spectra with a blur effect, pass instance
     //       number from vertex and use it to look up a texture array
+    let spectrum_len = f32(textureDimensions(spectrum_texture));
+    let spectrum_pos = (spectrum_len - in.abs_pos.y) / spectrum_len;
+    let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_pos).x;
+
+    // Only draw if current pixel is below scaled vertical amplitude
+    if (rel_amp * 96.0 > spectrum_amp) {
+        discard;
+    }
+
     // TODO: To prepare a spectrogram, the first fragment shader instance can
     //       just write the shaded data into a storage image that will be
     //       subsequently read by the spectrogram shader. But we need the
     //       instance number to be just right for this to work.
-    let pi = acos(-1.0);
-    if (rel_amp > 0.3 * sin(2.0 * pi * pixel_pos.y / 100.0) + 0.5) {
-        discard;
-    }
 
     // TODO: Pick color from a palette texture
     return vec4<f32>(

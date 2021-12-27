@@ -6,12 +6,15 @@ use crate::{
 };
 use log::{debug, error, info, trace};
 use wgpu::{
-    Backends, BlendState, ColorTargetState, ColorWrites, Device, DeviceDescriptor, Extent3d, Face,
-    Features, FragmentState, FrontFace, ImageDataLayout, Instance, Limits, MultisampleState,
+    AddressMode, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, BlendState,
+    ColorTargetState, ColorWrites, Device, DeviceDescriptor, Extent3d, Face, Features, FilterMode,
+    FragmentState, FrontFace, ImageDataLayout, Instance, Limits, MultisampleState,
     PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState,
     PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions,
-    ShaderModuleDescriptor, ShaderSource, Surface, SurfaceConfiguration, SurfaceError, Texture,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
+    SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
+    Surface, SurfaceConfiguration, SurfaceError, Texture, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
     VertexState,
 };
 use winit::{
@@ -49,6 +52,15 @@ pub struct GuiDisplay {
 
     /// Live spectrum texture descriptor (to recreate it on window resize)
     spectrum_texture_desc: TextureDescriptor<'static>,
+
+    /// Live spectrum texture bind group
+    spectrum_texture_bind_group: BindGroup,
+
+    /// Live spectrum texture bind group layout (to recreate bind group on window resize)
+    spectrum_texture_bind_group_layout: BindGroupLayout,
+
+    /// Spectrum & spectrogram sampling bind group
+    sampler_bind_group: BindGroup,
 }
 //
 impl GuiDisplay {
@@ -177,7 +189,74 @@ impl GuiDisplay {
         };
         surface.configure(&device, &surface_config);
 
-        // Load spectrum shader
+        // Set up spectrum and spectrogram texture sampling
+        let sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("Spectrum & spectrogram sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            ..Default::default()
+        });
+        //
+        let sampler_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Spectrum & spectrogram sampler bind group layout"),
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                }],
+            });
+        //
+        let sampler_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrum & spectrogram sampler bind group"),
+            layout: &sampler_bind_group_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::Sampler(&sampler),
+            }],
+        });
+
+        // Set up a texture to hold live spectrum data
+        let spectrum_texture_desc = TextureDescriptor {
+            label: Some("Spectrum texture"),
+            size: Extent3d {
+                width: surface_config.height as _,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D1,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
+        };
+
+        // TODO: Do similar stuff for the 2D spectrogram texture, except it must
+        //       be usable as a storage texture so that the live spectrum shader
+        //       can write new spectrum data to it.
+
+        // Define the live spectrum pipeline's texture bind group layout
+        let spectrum_texture_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Spectrum texture bind group layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: true },
+                            view_dimension: TextureViewDimension::D1,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // TODO: Add spectrogram as a storage image
+                ],
+            });
+
+        // Load live spectrum shader
         let spectrum_shader = device.create_shader_module(&ShaderModuleDescriptor {
             label: Some("Spectrum shader"),
             source: ShaderSource::Wgsl(include_str!("spectrum.wgsl").into()),
@@ -186,7 +265,10 @@ impl GuiDisplay {
         // Set up spectrum pipeline layout
         let spectrum_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Spectrum pipeline layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[
+                &sampler_bind_group_layout,
+                &spectrum_texture_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -229,21 +311,13 @@ impl GuiDisplay {
             multiview: None,
         });
 
-        // Set up a texture to hold live spectrum data
-        let spectrum_texture_desc = TextureDescriptor {
-            label: Some("Spectrum texture"),
-            size: Extent3d {
-                width: surface_config.height as _,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D1,
-            format: TextureFormat::R32Float,
-            usage: TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING,
-        };
-        let spectrum_texture = device.create_texture(&spectrum_texture_desc);
+        // Set up spectrum texture and associated bind group
+        let (spectrum_texture, spectrum_texture_bind_group) =
+            Self::configure_spectrum_texture_bind_group(
+                &device,
+                &spectrum_texture_desc,
+                &spectrum_texture_bind_group_layout,
+            );
 
         // ...and we're ready!
         Ok(Self {
@@ -256,6 +330,9 @@ impl GuiDisplay {
             spectrum_pipeline,
             spectrum_texture,
             spectrum_texture_desc,
+            spectrum_texture_bind_group,
+            spectrum_texture_bind_group_layout,
+            sampler_bind_group,
         })
     }
 
@@ -413,7 +490,7 @@ impl GuiDisplay {
         // Acquire a texture view (needed for render passes)
         let window_view = window_texture.texture.create_view(&TextureViewDescriptor {
             label: Some("Window surface texture view"),
-            ..TextureViewDescriptor::default()
+            ..Default::default()
         });
 
         // Prepare to render on the screen texture
@@ -452,7 +529,11 @@ impl GuiDisplay {
                 depth_stencil_attachment: None,
             });
 
-            // TODO: Bind
+            // Bind the spectrum & spectrogram sampler to bind group 0
+            render_pass.set_bind_group(0, &self.sampler_bind_group, &[]);
+
+            // Bind the spectrum & spectrogram textures to bind group 1
+            render_pass.set_bind_group(1, &self.spectrum_texture_bind_group, &[]);
 
             // Draw the live spectrum
             // TODO: Add more instances for older spectra
@@ -481,11 +562,43 @@ impl GuiDisplay {
         // Recreate display surface
         self.surface.configure(&self.device, &self.surface_config);
 
-        // Recreate live spectrum texture
+        // Recreate live spectrum texture and associated bind group
         self.spectrum_texture_desc.size.width = self.surface_config.height as _;
-        self.spectrum_texture = self.device.create_texture(&self.spectrum_texture_desc);
+        let (spectrum_texture, spectrum_texture_bind_group) =
+            Self::configure_spectrum_texture_bind_group(
+                &self.device,
+                &self.spectrum_texture_desc,
+                &self.spectrum_texture_bind_group_layout,
+            );
+        self.spectrum_texture = spectrum_texture;
+        self.spectrum_texture_bind_group = spectrum_texture_bind_group;
 
         // TODO: Once we do spectrograms, don't just drop the old data, resample
         //       it with a compute shader for nicer UX
+    }
+
+    /// (Re)configure spectrum texture and bind group
+    fn configure_spectrum_texture_bind_group(
+        device: &Device,
+        spectrum_texture_desc: &TextureDescriptor,
+        spectrum_texture_bind_group_layout: &BindGroupLayout,
+    ) -> (Texture, BindGroup) {
+        let spectrum_texture = device.create_texture(&spectrum_texture_desc);
+        let spectrum_texture_view = spectrum_texture.create_view(&TextureViewDescriptor {
+            label: Some("Spectrum texture view"),
+            ..Default::default()
+        });
+        let spectrum_texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrum texture bind group"),
+            layout: &spectrum_texture_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&spectrum_texture_view),
+                },
+                // TODO: Add spectrogram as a storage image
+            ],
+        });
+        (spectrum_texture, spectrum_texture_bind_group)
     }
 }
