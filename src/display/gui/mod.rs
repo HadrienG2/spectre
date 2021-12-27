@@ -406,7 +406,6 @@ impl GuiDisplay {
                 conservative: false,
             },
             depth_stencil: None,
-            // TODO: Enable MSAA
             multisample: MultisampleState {
                 count: 1,
                 mask: !0,
@@ -417,7 +416,7 @@ impl GuiDisplay {
                 entry_point: "fragment",
                 targets: &[ColorTargetState {
                     format: surface_config.format,
-                    // TODO: Enable alpha blending once we went to
+                    // TODO: Enable alpha blending once we want to
                     //       render older spectra with a blur effect
                     blend: Some(BlendState::REPLACE),
                     write_mask: ColorWrites::ALL,
