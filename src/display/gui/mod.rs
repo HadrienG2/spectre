@@ -2,56 +2,35 @@
 // FIXME: This module is getting very long and should be split into smaller entities
 
 mod core;
+mod settings;
 
-use self::core::{CoreContext, HighLevelEvent};
+use self::{core::HighLevelEvent, settings::Settings};
 use crate::{
     display::{FrameInput, FrameResult},
     Result,
 };
 use colorous::{Color, INFERNO};
-use crevice::std140::{AsStd140, Std140};
 use half::f16;
-use std::{
-    num::NonZeroU64,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use wgpu::{
-    util::{BufferInitDescriptor, DeviceExt},
-    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+    util::DeviceExt, AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, BlendState,
-    Buffer, BufferBinding, BufferBindingType, BufferUsages, ColorTargetState, ColorWrites, Device,
-    Extent3d, Face, FilterMode, FragmentState, FrontFace, ImageDataLayout, MultisampleState,
-    PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology, RenderPipeline,
-    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor,
-    ShaderSource, ShaderStages, StorageTextureAccess, SurfaceError, Texture, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor,
-    TextureViewDimension, VertexState,
+    ColorTargetState, ColorWrites, Device, Extent3d, Face, FilterMode, FragmentState, FrontFace,
+    ImageDataLayout, MultisampleState, PipelineLayoutDescriptor, PolygonMode, PrimitiveState,
+    PrimitiveTopology, RenderPipeline, RenderPipelineDescriptor, SamplerBindingType,
+    SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, StorageTextureAccess,
+    SurfaceError, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+    TextureUsages, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 use winit::event_loop::ControlFlow;
+
+/// Re-export core context type for child modules
+pub(self) use self::core::CoreContext;
 
 /// Custom winit event type
 type CustomEvent = ();
 type EventLoop = winit::event_loop::EventLoop<CustomEvent>;
 type Event<'a> = winit::event::Event<'a, CustomEvent>;
-
-/// Default fraction of the window used by the live spectrum
-const DEFAULT_SPECTRUM_WIDTH: f32 = 0.25;
-
-/// Uniform for passing UI settings to GPU shaders
-//
-// NOTE: According to the Learn WGPU tutorial...
-//       "To make uniform buffers portable they have to be std140 and not
-//       std430. Uniform structs have to be std140. Storage structs have to be
-//       std430. Storage buffers for compute shaders can be std140 or std430."
-//
-#[derive(AsStd140)]
-struct SettingsUniform {
-    /// Horizontal fraction of the window that is occupied by the live spectrum
-    spectrum_width: f32,
-
-    /// Range of amplitudes that we can display in dB
-    amp_scale: f32,
-}
 
 /// GPU-accelerated spectrum display
 pub struct GuiDisplay {
@@ -62,14 +41,10 @@ pub struct GuiDisplay {
     core_context: CoreContext,
 
     /// UI settings
-    // TODO: Once we start to update this, remember to upload into settings_buffer
-    settings: SettingsUniform,
+    settings: Settings,
 
-    /// Buffer for holding UI settings on the device
-    settings_buffer: Buffer,
-
-    /// Bind group for things that are never rebound (basic sampler, UI settings)
-    static_bind_group: BindGroup,
+    /// Live spectrum bind group for things that are never rebound (basic sampler, UI settings)
+    spectrum_static_bind_group: BindGroup,
 
     /// Live spectrum texture
     spectrum_texture: Texture,
@@ -132,17 +107,8 @@ impl GuiDisplay {
         let surface_config = core_context.surface_config();
         let scale_factor = core_context.scale_factor();
 
-        // Set up UI settings uniform
-        let settings = SettingsUniform {
-            spectrum_width: DEFAULT_SPECTRUM_WIDTH,
-            amp_scale,
-        };
-        //
-        let settings_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("UI settings uniform"),
-            contents: settings.as_std140().as_bytes(),
-            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
-        });
+        // Set up GPU UI settings
+        let (settings, settings_bind_group_layout) = Settings::new(device, amp_scale);
 
         // Set up spectrum texture sampling
         let spectrum_sampler = device.create_sampler(&SamplerDescriptor {
@@ -186,37 +152,18 @@ impl GuiDisplay {
         });
 
         // Set up the common bind group for things that don't need rebinding
-        //
-        // FIXME: This bind group doesn't make a lot of sense, split it into a
-        //        part that's truly common between the live spectrum and the
-        //        spectrogram, and a part that's live spectrum specific.
-        //        Call the common part common_bind_group and the other
-        //        spectrum_static_bind_group.
-        //
-        let static_bind_group_layout =
+        let spectrum_static_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("Spectrum & spectrogram static bind group layout"),
+                label: Some("Spectrum static bind group layout"),
                 entries: &[
                     BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: ShaderStages::VERTEX_FRAGMENT,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: NonZeroU64::new(
-                                std::mem::size_of::<SettingsUniform>() as u64,
-                            ),
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 1,
                         visibility: ShaderStages::FRAGMENT,
                         ty: BindingType::Sampler(SamplerBindingType::Filtering),
                         count: None,
                     },
                     BindGroupLayoutEntry {
-                        binding: 2,
+                        binding: 1,
                         visibility: ShaderStages::FRAGMENT,
                         ty: BindingType::Texture {
                             sample_type: TextureSampleType::Float { filterable: true },
@@ -228,24 +175,16 @@ impl GuiDisplay {
                 ],
             });
         //
-        let static_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Spectrum & spectrogram static bind group"),
-            layout: &static_bind_group_layout,
+        let spectrum_static_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrum static bind group"),
+            layout: &spectrum_static_bind_group_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: BindingResource::Buffer(BufferBinding {
-                        buffer: &settings_buffer,
-                        offset: 0,
-                        size: None,
-                    }),
-                },
-                BindGroupEntry {
-                    binding: 1,
                     resource: BindingResource::Sampler(&spectrum_sampler),
                 },
                 BindGroupEntry {
-                    binding: 2,
+                    binding: 1,
                     resource: BindingResource::TextureView(&palette_texture_view),
                 },
             ],
@@ -318,7 +257,11 @@ impl GuiDisplay {
         // Set up spectrum pipeline layout
         let spectrum_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Spectrum pipeline layout"),
-            bind_group_layouts: &[&static_bind_group_layout, &spectrum_sized_bind_group_layout],
+            bind_group_layouts: &[
+                &settings_bind_group_layout,
+                &spectrum_static_bind_group_layout,
+                &spectrum_sized_bind_group_layout,
+            ],
             push_constant_ranges: &[],
         });
 
@@ -414,7 +357,7 @@ impl GuiDisplay {
             device.create_pipeline_layout(&PipelineLayoutDescriptor {
                 label: Some("Spectrogram pipeline layout"),
                 bind_group_layouts: &[
-                    &static_bind_group_layout,
+                    &settings_bind_group_layout,
                     &spectrogram_static_bind_group_layout,
                     &spectrogram_sized_bind_group_layout,
                 ],
@@ -485,8 +428,7 @@ impl GuiDisplay {
             event_loop: Some(event_loop),
             core_context,
             settings,
-            settings_buffer,
-            static_bind_group,
+            spectrum_static_bind_group,
             spectrum_texture,
             spectrum_texture_desc,
             spectrogram_texture,
@@ -515,7 +457,7 @@ impl GuiDisplay {
         mut self,
         mut frame_callback: impl FnMut(&mut Self, FrameInput) -> Result<FrameResult> + 'static,
     ) -> ! {
-        // Render a first frame
+        // Display the first frame
         let first_result = frame_callback(
             &mut self,
             FrameInput {
@@ -572,6 +514,12 @@ impl GuiDisplay {
                     // The event loop will be destroyed after this call, drop
                     // the things that need dropping for correctness
                     Some(HighLevelEvent::Exit) => std::mem::drop(frame_callback.take()),
+
+                    // TODO: Provide some mouse controls: adjust spectrum width
+                    //       via click-drag around separator, spectrum and
+                    //       spectrogram zoom-in via click drag + zoom out via
+                    //       right click, zoom specific to time, frequency or
+                    //       magnitude scales once we have scale bars for those.
 
                     // This event need not concern us
                     None => {}
@@ -631,6 +579,9 @@ impl GuiDisplay {
             self.last_spectrogram_idx = (self.last_spectrogram_idx + 1) % surface_width;
         }
 
+        // Update the settings
+        let settings_bind_group = self.settings.updated(queue);
+
         {
             // Set up a render pass with a black clear color
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -652,8 +603,9 @@ impl GuiDisplay {
             });
 
             // Draw the live spectrum
-            render_pass.set_bind_group(0, &self.static_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.spectrum_sized_bind_group, &[]);
+            render_pass.set_bind_group(0, settings_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.spectrum_static_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.spectrum_sized_bind_group, &[]);
             render_pass.set_pipeline(&self.spectrum_pipeline);
             render_pass.draw(
                 0..4,
@@ -676,7 +628,7 @@ impl GuiDisplay {
             });
 
             // Draw the spectrogram
-            render_pass.set_bind_group(0, &self.static_bind_group, &[]);
+            render_pass.set_bind_group(0, settings_bind_group, &[]);
             render_pass.set_bind_group(1, &self.spectrogram_static_bind_group, &[]);
             render_pass.set_bind_group(2, &self.spectrogram_sized_bind_group, &[]);
             render_pass.set_pipeline(&self.spectrogram_pipeline);

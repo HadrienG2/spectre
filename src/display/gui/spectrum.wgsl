@@ -42,19 +42,19 @@ fn vertex(
 }
 
 // Sampler for spectra and spectrograms
-[[ group(0), binding(1) ]]
+[[ group(1), binding(0) ]]
 var spectrum_sampler: sampler;
 
 // Spectrum color palette
-[[ group(0), binding(2) ]]
+[[ group(1), binding(1) ]]
 var palette_texture: texture_1d<f32>;
 
 // Live spectrum texture
-[[ group(1), binding(0) ]]
+[[ group(2), binding(0) ]]
 var spectrum_texture: texture_1d<f32>;
 
 // Spectrogram texture
-[[ group(1), binding(1) ]]
+[[ group(2), binding(1) ]]
 var spectrogram_texture: texture_storage_2d<rgba16float, write>;
 
 [[stage(fragment)]]
