@@ -89,7 +89,7 @@ struct CliOpts {
     /// If this is set above the screen refresh rate, it will be capped to it.
     ///
     #[cfg(all(feature = "gui", not(feature = "cli")))]
-    #[structopt(long, default_value = "100")]
+    #[structopt(long, default_value = "200")]
     spectrogram_refresh: f32,
 }
 

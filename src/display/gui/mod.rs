@@ -1,6 +1,9 @@
 //! WebGPU-based spectrum display
 // FIXME: This module is getting very long and should be split into smaller entities
 
+mod core;
+
+use self::core::{CoreContext, HighLevelEvent};
 use crate::{
     display::{FrameInput, FrameResult},
     Result,
@@ -8,31 +11,28 @@ use crate::{
 use colorous::{Color, INFERNO};
 use crevice::std140::{AsStd140, Std140};
 use half::f16;
-use log::{debug, error, info, trace};
 use std::{
     num::NonZeroU64,
     time::{Duration, Instant},
 };
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
-    AddressMode, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, BlendState,
     Buffer, BufferBinding, BufferBindingType, BufferUsages, ColorTargetState, ColorWrites, Device,
-    DeviceDescriptor, Extent3d, Face, Features, FilterMode, FragmentState, FrontFace,
-    ImageDataLayout, Instance, Limits, MultisampleState, PipelineLayoutDescriptor, PolygonMode,
-    PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPipeline,
-    RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, StorageTextureAccess, Surface,
-    SurfaceConfiguration, SurfaceError, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
-    VertexState,
+    Extent3d, Face, FilterMode, FragmentState, FrontFace, ImageDataLayout, MultisampleState,
+    PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology, RenderPipeline,
+    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor,
+    ShaderSource, ShaderStages, StorageTextureAccess, SurfaceError, Texture, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor,
+    TextureViewDimension, VertexState,
 };
-use winit::{
-    dpi::PhysicalSize,
-    event::{ElementState, Event, ModifiersState, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
-};
+use winit::event_loop::ControlFlow;
+
+/// Custom winit event type
+type CustomEvent = ();
+type EventLoop = winit::event_loop::EventLoop<CustomEvent>;
+type Event<'a> = winit::event::Event<'a, CustomEvent>;
 
 /// Default fraction of the window used by the live spectrum
 const DEFAULT_SPECTRUM_WIDTH: f32 = 0.25;
@@ -56,22 +56,10 @@ struct SettingsUniform {
 /// GPU-accelerated spectrum display
 pub struct GuiDisplay {
     /// Event loop
-    event_loop: Option<EventLoop<()>>,
+    event_loop: Option<EventLoop>,
 
-    /// Window
-    window: Window,
-
-    /// Associated GPU surface
-    surface: Surface,
-
-    /// GPU surface configuration (to recreate it when e.g. window is resized)
-    surface_config: SurfaceConfiguration,
-
-    /// GPU device context
-    device: Device,
-
-    /// Queue for submitting work to the GPU device
-    queue: Queue,
+    /// Core context
+    core_context: CoreContext,
 
     /// UI settings
     // TODO: Once we start to update this, remember to upload into settings_buffer
@@ -119,9 +107,6 @@ pub struct GuiDisplay {
     /// Transit buffer for casting spectrum magnitudes to single precision
     half_spectrum_data: Box<[f16]>,
 
-    /// Last observed DPI scale factor
-    scale_factor: f64,
-
     /// Spectrogram refresh period
     spectrogram_refresh_period: Duration,
 
@@ -137,127 +122,15 @@ impl GuiDisplay {
     pub fn new(amp_scale: f32, spectrogram_refresh_rate: f32) -> Result<Self> {
         assert!(amp_scale > 0.0);
 
-        // Set up event loop
+        // Set up the event loop
         let event_loop = EventLoop::new();
 
-        // Configure window
-        let window = WindowBuilder::new()
-            .with_resizable(true)
-            .with_title("Spectre")
-            .with_visible(false)
-            .with_transparent(false)
-            // TODO: with_window_icon
-            .build(&event_loop)?;
-        let inner_size = window.inner_size();
-        let scale_factor = window.scale_factor();
-        info!(
-            "Built window with id {:?}, inner physical size {}x{}, DPI scale factor {}",
-            window.id(),
-            inner_size.width,
-            inner_size.height,
-            scale_factor
-        );
-
-        // Initialize WebGPU adapter and presentation surface
-        let instance = Instance::new(Backends::PRIMARY);
-        let surface = unsafe { instance.create_surface(&window) };
-        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
-            power_preference: PowerPreference::LowPower,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .expect("No compatible GPU found");
-
-        // Describe adapter features
-        let adapter_features = adapter.features();
-        if adapter_features == Features::all() {
-            info!("Adapter supports all standard and native WebGPU features");
-        } else if adapter_features.contains(Features::all_webgpu_mask()) {
-            let native_features = adapter_features.difference(Features::all_webgpu_mask());
-            info!(
-                "Adapter supports all standard WebGPU features and also native features {:?}",
-                native_features
-            );
-        } else {
-            info!("Adapter supports WebGPU features {:?}", adapter.features());
-        }
-        debug!(
-            "In other words, it does NOT support features {:?}",
-            Features::all().difference(adapter_features)
-        );
-
-        // Describe adapter limits
-        let adapter_limits = adapter.limits();
-        if adapter_limits >= Limits::default() {
-            info!("Adapter supports the default WebGPU limits");
-        } else if adapter_limits >= Limits::downlevel_defaults() {
-            info!("Adapter supports the down-level WebGPU limits");
-        } else {
-            error!("Detected GPU does not even support the down-level WebGPU limits");
-        }
-        debug!(
-            "To be more precise, adapter goes up to {:#?}",
-            adapter.limits()
-        );
-
-        // Describe adapter WebGPU compliance limits, if any
-        let downlevel_properties = adapter.get_downlevel_properties();
-        if !downlevel_properties.is_webgpu_compliant() {
-            info!(
-                "Adapter is not fully WebGPU compliant, it has additional limits {:#?}",
-                adapter.get_downlevel_properties(),
-            );
-        }
-
-        // Describe preferred presentation surface format
-        let preferred_surface_format = surface
-            .get_preferred_format(&adapter)
-            .expect("By the above constraint, the surface should be compatible with the adapter");
-        info!(
-            "Got surface with preferred format {:?} and associated features {:?}",
-            preferred_surface_format,
-            adapter.get_texture_format_features(preferred_surface_format),
-        );
-
-        // Define minimal device requirements
-        let mut limits = Limits::downlevel_defaults();
-        let monitor = window
-            .current_monitor()
-            .or(window.primary_monitor())
-            .or(window.available_monitors().next());
-        match monitor.map(|m| m.size()) {
-            None
-            | Some(PhysicalSize {
-                width: 0,
-                height: 0,
-            }) => {}
-            Some(PhysicalSize { width, height }) => {
-                let max_size = width.max(height);
-                limits.max_texture_dimension_1d = limits.max_texture_dimension_1d.max(max_size);
-                limits.max_texture_dimension_2d = limits.max_texture_dimension_2d.max(max_size);
-            }
-        }
-        debug!("Want a device that goes up to {:#?}", limits);
-
-        // Configure device and queue
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &DeviceDescriptor {
-                label: Some("GPU"),
-                features: Features::empty(),
-                limits,
-            },
-            None,
-        ))?;
-
-        // Configure the surface for rendering:
-        let surface_config = SurfaceConfiguration {
-            usage: TextureUsages::RENDER_ATTACHMENT,
-            format: preferred_surface_format,
-            width: inner_size.width,
-            height: inner_size.height,
-            present_mode: PresentMode::Fifo,
-        };
-        surface.configure(&device, &surface_config);
+        // Set up the core context
+        let core_context = CoreContext::new(&event_loop)?;
+        let device = core_context.device();
+        let queue = core_context.queue();
+        let surface_config = core_context.surface_config();
+        let scale_factor = core_context.scale_factor();
 
         // Set up UI settings uniform
         let settings = SettingsUniform {
@@ -313,6 +186,13 @@ impl GuiDisplay {
         });
 
         // Set up the common bind group for things that don't need rebinding
+        //
+        // FIXME: This bind group doesn't make a lot of sense, split it into a
+        //        part that's truly common between the live spectrum and the
+        //        spectrogram, and a part that's live spectrum specific.
+        //        Call the common part common_bind_group and the other
+        //        spectrum_static_bind_group.
+        //
         let static_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: Some("Spectrum & spectrogram static bind group layout"),
@@ -598,16 +478,12 @@ impl GuiDisplay {
 
         // Set up spectrogram refreshes
         let spectrogram_refresh_period =
-            Duration::from_secs_f64(scale_factor / spectrogram_refresh_rate as f64);
+            Duration::from_secs_f32(scale_factor / spectrogram_refresh_rate);
 
         // ...and we're ready!
         Ok(Self {
             event_loop: Some(event_loop),
-            window,
-            surface,
-            surface_config,
-            device,
-            queue,
+            core_context,
             settings,
             settings_buffer,
             static_bind_group,
@@ -623,7 +499,6 @@ impl GuiDisplay {
             spectrogram_sized_bind_group_layout,
             spectrogram_pipeline,
             half_spectrum_data,
-            scale_factor,
             spectrogram_refresh_period,
             last_spectrogram_refresh: Instant::now(),
             last_spectrogram_idx: 0,
@@ -632,7 +507,7 @@ impl GuiDisplay {
 
     /// Report desired spectrum length in bins
     pub fn spectrum_len(&self) -> usize {
-        self.surface_config.height as _
+        self.core_context.surface_config().height as _
     }
 
     /// Start the event loop, run a user-provided callback on every frame
@@ -640,7 +515,7 @@ impl GuiDisplay {
         mut self,
         mut frame_callback: impl FnMut(&mut Self, FrameInput) -> Result<FrameResult> + 'static,
     ) -> ! {
-        // Render a first frame and make the window visible
+        // Render a first frame
         let first_result = frame_callback(
             &mut self,
             FrameInput {
@@ -652,95 +527,41 @@ impl GuiDisplay {
             std::mem::drop(frame_callback);
             std::process::exit(0);
         }
-        self.window.set_visible(true);
+        self.core_context.show_window();
 
-        // Start the actual event loop
-        let mut keyboard_modifiers = ModifiersState::default();
+        // Start the event loop
         let mut frame_callback = Some(frame_callback);
         let mut resized = false;
         self.event_loop
             .take()
             .expect("Event loop should be present")
             .run(move |event, _target, control_flow| {
-                match event {
-                    // Handle our window's events
-                    Event::WindowEvent { window_id, event } if window_id == self.window.id() => {
-                        match event {
-                            // Handle various app termination events
-                            WindowEvent::CloseRequested | WindowEvent::Destroyed => {
-                                *control_flow = ControlFlow::Exit
-                            }
-
-                            // Handle keyboard input
-                            WindowEvent::ModifiersChanged(modifiers) => {
-                                keyboard_modifiers = modifiers
-                            }
-                            //
-                            ref event @ WindowEvent::KeyboardInput { ref input, .. } => {
-                                if input.state != ElementState::Pressed {
-                                    trace!("Unhandled non-press keyboard event : {:?}", event);
-                                }
-                                match input.virtual_keycode {
-                                    Some(VirtualKeyCode::F4) if keyboard_modifiers.alt() => {
-                                        *control_flow = ControlFlow::Exit
-                                    }
-                                    _ => trace!("Unhandled key-press event : {:?}", event),
-                                }
-                            }
-                            //
-                            // TODO: Handle run-time settings changes via
-                            //       WindowEvent::ReceivedCharacter(char)
-
-                            // Resize and DPI changes
-                            WindowEvent::Resized(new_size) => {
-                                self.surface_config.width = new_size.width;
-                                self.surface_config.height = new_size.height;
-                                resized = true;
-                            }
-                            WindowEvent::ScaleFactorChanged {
-                                scale_factor,
-                                new_inner_size,
-                            } => {
-                                self.spectrogram_refresh_period = Duration::from_secs_f64(
-                                    self.spectrogram_refresh_period.as_secs_f64() * scale_factor
-                                        / self.scale_factor,
-                                );
-                                self.scale_factor = scale_factor;
-                                self.surface_config.width = new_inner_size.width;
-                                self.surface_config.height = new_inner_size.height;
-                                resized = true;
-                            }
-
-                            // Ignore chatty events we don't care about
-                            WindowEvent::AxisMotion { .. }
-                            | WindowEvent::CursorMoved { .. }
-                            | WindowEvent::CursorEntered { .. }
-                            | WindowEvent::CursorLeft { .. }
-                            | WindowEvent::Moved(_) => {}
-
-                            // Log other events we don't handle yet
-                            _ => trace!("Unhandled window event: {:?}", event),
+                // Perform basic event handling, extract higher-level ops
+                match self.core_context.handle_event(event, control_flow) {
+                    // Window has been resized, DPI may have changed as well
+                    Some(HighLevelEvent::Resized { scale_factor_ratio }) => {
+                        resized = true;
+                        if let Some(scale_factor_ratio) = scale_factor_ratio {
+                            self.spectrogram_refresh_period = Duration::from_secs_f32(
+                                self.spectrogram_refresh_period.as_secs_f32() * scale_factor_ratio,
+                            );
                         }
                     }
 
-                    // Render new frame once all events have been processed
-                    Event::MainEventsCleared => {
-                        self.window.request_redraw();
-                    }
-                    //
-                    Event::RedrawRequested(window_id) if window_id == self.window.id() => {
+                    // It is time to draw a new frame
+                    Some(HighLevelEvent::Redraw) => {
                         let mut frame_input = FrameInput {
                             new_spectrum_len: None,
                         };
                         if resized {
-                            frame_input.new_spectrum_len = Some(self.surface_config.height as _);
+                            frame_input.new_spectrum_len =
+                                Some(self.core_context.surface_config().height as _);
                             self.handle_resize();
                             resized = false;
                         }
-                        match frame_callback
-                            .as_mut()
-                            .expect("Frame callback should be present")(
-                            &mut self, frame_input
+                        match frame_callback.as_mut().expect("Callback should be present")(
+                            &mut self,
+                            frame_input,
                         ) {
                             Ok(FrameResult::Continue) => {}
                             Ok(FrameResult::Stop) => *control_flow = ControlFlow::Exit,
@@ -748,18 +569,12 @@ impl GuiDisplay {
                         }
                     }
 
-                    // Help out winit's event loop at handling drop
-                    Event::LoopDestroyed => {
-                        std::mem::drop(frame_callback.take());
-                    }
+                    // The event loop will be destroyed after this call, drop
+                    // the things that need dropping for correctness
+                    Some(HighLevelEvent::Exit) => std::mem::drop(frame_callback.take()),
 
-                    // Ignore chatty events we don't care about
-                    Event::NewEvents(_)
-                    | Event::RedrawEventsCleared
-                    | Event::DeviceEvent { .. } => {}
-
-                    // Log other events we don't handle yet
-                    _ => trace!("Unhandled winit event: {:?}", event),
+                    // This event need not concern us
+                    None => {}
                 }
             })
     }
@@ -767,7 +582,7 @@ impl GuiDisplay {
     /// Display a spectrum
     pub fn render(&mut self, data: &[f32]) -> Result<()> {
         // Try to access the next window texture
-        let window_texture = match self.surface.get_current_texture() {
+        let window_texture = match self.core_context.surface().get_current_texture() {
             // Succeeded
             Ok(texture) => texture,
 
@@ -789,11 +604,12 @@ impl GuiDisplay {
         });
 
         // Prepare to render on the screen texture
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Spectrum render encoder"),
-            });
+        let mut encoder =
+            self.core_context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Spectrum render encoder"),
+                });
 
         // Convert the new spectrum data to half precision
         for (dest, &src) in self.half_spectrum_data.iter_mut().zip(data) {
@@ -801,7 +617,8 @@ impl GuiDisplay {
         }
 
         // Send the new spectrum data to the device
-        self.queue.write_texture(
+        let queue = self.core_context.queue();
+        queue.write_texture(
             self.spectrum_texture.as_image_copy(),
             bytemuck::cast_slice(&self.half_spectrum_data[..]),
             ImageDataLayout::default(),
@@ -810,7 +627,8 @@ impl GuiDisplay {
 
         // Move spectrogram forward if enough time elapsed
         if self.last_spectrogram_refresh.elapsed() >= self.spectrogram_refresh_period {
-            self.last_spectrogram_idx = (self.last_spectrogram_idx + 1) % self.surface_config.width;
+            let surface_width = self.core_context.surface_config().width;
+            self.last_spectrogram_idx = (self.last_spectrogram_idx + 1) % surface_width;
         }
 
         {
@@ -869,7 +687,7 @@ impl GuiDisplay {
         }
 
         // Submit our render command
-        self.queue.submit(Some(encoder.finish()));
+        queue.submit(Some(encoder.finish()));
 
         // Make sure the output gets displayed on the screen
         window_texture.present();
@@ -884,20 +702,21 @@ impl GuiDisplay {
 
     /// Reallocate structures that depend on the window size after a resize
     fn handle_resize(&mut self) {
-        // Recreate display surface
-        self.surface.configure(&self.device, &self.surface_config);
+        // Reset core context
+        self.core_context.handle_resize();
+        let surface_config = self.core_context.surface_config();
 
         // Recreate live spectrum texture and associated bind group
-        self.spectrum_texture_desc.size.width = self.surface_config.height as _;
-        self.spectrogram_texture_desc.size.width = self.surface_config.width as _;
-        self.spectrogram_texture_desc.size.height = self.surface_config.height as _;
+        self.spectrum_texture_desc.size.width = surface_config.height as _;
+        self.spectrogram_texture_desc.size.width = surface_config.width as _;
+        self.spectrogram_texture_desc.size.height = surface_config.height as _;
         let (
             spectrum_texture,
             spectrogram_texture,
             spectrum_sized_bind_group,
             spectrogram_sized_bind_group,
         ) = Self::configure_sized_bind_groups(
-            &self.device,
+            &self.core_context.device(),
             &self.spectrum_texture_desc,
             &self.spectrogram_texture_desc,
             &self.spectrum_sized_bind_group_layout,
@@ -913,11 +732,11 @@ impl GuiDisplay {
 
         // Recreate half-precision spectrum data buffer
         self.half_spectrum_data = std::iter::repeat(f16::default())
-            .take(self.surface_config.height as _)
+            .take(surface_config.height as _)
             .collect();
 
         // Make sure the spectrogram write index stays in range
-        self.last_spectrogram_idx = self.last_spectrogram_idx.min(self.surface_config.width - 1);
+        self.last_spectrogram_idx = self.last_spectrogram_idx.min(surface_config.width - 1);
     }
 
     /// (Re)configure size-dependent textures and bind groups
