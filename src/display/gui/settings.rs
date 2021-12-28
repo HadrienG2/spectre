@@ -101,6 +101,10 @@ impl Settings {
     }
 
     /// Update settings if needed, get the associated bind group
+    ///
+    /// Because this takes a mutable reference, settings cannot be changed while
+    /// the bind group is alive, which provides extra race condition safety.
+    ///
     pub fn updated(&mut self, queue: &Queue) -> &BindGroup {
         if self.updated {
             queue.write_buffer(&self.buffer, 0, self.uniform.as_std140().as_bytes());
