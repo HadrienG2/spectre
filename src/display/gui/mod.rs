@@ -149,12 +149,13 @@ impl GuiDisplay {
             // TODO: with_window_icon
             .build(&event_loop)?;
         let inner_size = window.inner_size();
+        let scale_factor = window.scale_factor();
         info!(
             "Built window with id {:?}, inner physical size {}x{}, DPI scale factor {}",
             window.id(),
             inner_size.width,
             inner_size.height,
-            window.scale_factor()
+            scale_factor
         );
 
         // Initialize WebGPU adapter and presentation surface
@@ -596,7 +597,6 @@ impl GuiDisplay {
             .collect();
 
         // Set up spectrogram refreshes
-        let scale_factor = window.scale_factor();
         let spectrogram_refresh_period =
             Duration::from_secs_f64(scale_factor / spectrogram_refresh_rate as f64);
 
