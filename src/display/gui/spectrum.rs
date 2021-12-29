@@ -172,7 +172,7 @@ impl Spectrum {
 
         // Load live spectrum shader
         let shader = device.create_shader_module(&ShaderModuleDescriptor {
-            label: Some("Spectrum shader"),
+            label: Some("Spectrum shaders"),
             source: ShaderSource::Wgsl(include_str!("spectrum.wgsl").into()),
         });
 

@@ -116,7 +116,7 @@ impl Spectrogram {
 
         // Load shader
         let shader = device.create_shader_module(&ShaderModuleDescriptor {
-            label: Some("Spectrogram shader"),
+            label: Some("Spectrogram shaders"),
             source: ShaderSource::Wgsl(include_str!("spectrogram.wgsl").into()),
         });
 
