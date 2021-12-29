@@ -56,14 +56,21 @@ fn upscale_fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
     }
 }
 
-[[ stage(compute), workgroup_size(1, 256) ]]
-fn downscale() {
-    // TODO: Each workgroup represents a set of pixels in the input image.
+// Minimal workgroup size requirement from WebGPU downlevel defaults
+let workgroup_size: u32 = 256;
+
+[[ stage(compute), workgroup_size(workgroup_size) ]]
+fn downscale_to_unorm32() {
+    // TODO: Each workgroup represents a column of pixels in the input image.
     //       Input values are aggregated using atomics into a workgroup-local
-    //       array, which represents the matching pixels of the output image,
-    //       then a workgroup barrier is inserted, and there is one global
-    //       accumulation into the global storage buffer at the end. Finally,
-    //       the global storage buffer is copied into a texture to create the
-    //       new texture. Since WGPU only has integer atomics, we will need
-    //       another compute shader to do this, which does format conversion.
+    //       array of workgroup_size atomics, which represents the matching
+    //       pixels of the output image. Depending on whether the input pixel
+    //       maps into one or two output bins, one or two atomics may be needed.
+    //       Then a workgroup barrier is inserted, and there is one global
+    //       accumulation into the global storage buffer at the end. Since
+    //       WebGPU only has (i|u)32 atomics in storage buffers, we will need
+    //       another render pipeline after that to perform format conversion to
+    //       our final rgba8 format.
 }
+
+// TODO: Add vertex/fragment shader pipeline for unorm32 -> rgbaf16 conversion
