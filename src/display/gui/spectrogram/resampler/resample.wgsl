@@ -12,7 +12,7 @@ struct VertexOutput {
 };
 
 [[ stage(vertex) ]]
-fn vertex(
+fn upscale_vertex(
     [[ builtin(vertex_index) ]] vertex_idx: u32,
     [[ builtin(instance_index) ]] last_write_idx: u32,
 ) -> VertexOutput {
@@ -37,7 +37,7 @@ var old_spectrogram_sampler: sampler;
 var old_spectrogram_texture: texture_2d<f32>;
 
 [[ stage(fragment) ]]
-fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
+fn upscale_fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
     // Probe old spectrogram at a position matching new spectrogram location...
     let old_spectrogram_width = f32(textureDimensions(old_spectrogram_texture).x);
     let shifted_x = f32(in.last_write_idx) - in.abs_pos.x;
@@ -55,3 +55,5 @@ fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
 }
+
+// TODO: Add downsampling compute shader
