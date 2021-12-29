@@ -116,8 +116,8 @@ impl Spectrogram {
 
         // Load shader
         let shader = device.create_shader_module(&ShaderModuleDescriptor {
-            label: Some("Spectrogram shaders"),
-            source: ShaderSource::Wgsl(include_str!("spectrogram.wgsl").into()),
+            label: Some("Spectrogram rendering shaders"),
+            source: ShaderSource::Wgsl(include_str!("render.wgsl").into()),
         });
 
         // Set up pipeline layout
@@ -191,8 +191,21 @@ impl Spectrogram {
     /// Handle window resize, return texture view to update spectrogram writer
     pub fn handle_resize(&mut self, new_core_context: &CoreContext) -> TextureView {
         // TODO: Don't just drop the old spectrogram texture, resample
-        //       it with a compute shader for nicer UX. This will almost
+        //       it with extra shaders for nicer UX. This will almost
         //       certainly require setting new usage flags in the descriptor.
+        //
+        //       Upscaling can be done with a very simple rendering pipeline
+        //       that essentially renders a full-screen quad from the sampled
+        //       old texture to the new texture. This rendering pipeline can
+        //       steal the bind groups of the main rendering pipeline.
+        //
+        //       Downscaling can be done with a compute shader whose workgroups
+        //       represent spectrogram line segments, with intermediate
+        //       aggregation done using workgroup-local atomics and final
+        //       merging using global memory atomics.
+        //
+        //       This functionality is complex enough that it deserves to be in
+        //       a submodule of this module.
 
         // Make sure the write index stays in range
         let surface_config = new_core_context.surface_config();

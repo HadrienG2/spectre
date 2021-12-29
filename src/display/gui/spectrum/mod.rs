@@ -172,8 +172,8 @@ impl Spectrum {
 
         // Load live spectrum shader
         let shader = device.create_shader_module(&ShaderModuleDescriptor {
-            label: Some("Spectrum shaders"),
-            source: ShaderSource::Wgsl(include_str!("spectrum.wgsl").into()),
+            label: Some("Spectrum rendering shaders"),
+            source: ShaderSource::Wgsl(include_str!("render.wgsl").into()),
         });
 
         // Set up spectrum pipeline layout
