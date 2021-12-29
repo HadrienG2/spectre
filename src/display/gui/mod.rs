@@ -273,7 +273,6 @@ impl GuiDisplay {
         let (half_spectrum_data, spectrum_texture, spectrum_sized_bind_group) =
             Self::configure_sized_data(
                 &device,
-                surface_config.height,
                 &spectrum_texture_desc,
                 spectrogram_texture_view,
                 &spectrum_sized_bind_group_layout,
@@ -501,7 +500,6 @@ impl GuiDisplay {
         let (half_spectrum_data, spectrum_texture, spectrum_sized_bind_group) =
             Self::configure_sized_data(
                 &self.core_context.device(),
-                surface_config.height,
                 &self.spectrum_texture_desc,
                 spectrogram_texture_view,
                 &self.spectrum_sized_bind_group_layout,
@@ -514,14 +512,13 @@ impl GuiDisplay {
     /// (Re)configure size-dependent textures and bind groups
     fn configure_sized_data(
         device: &Device,
-        surface_height: u32,
         spectrum_texture_desc: &TextureDescriptor,
         spectrogram_texture_view: TextureView,
         spectrum_sized_bind_group_layout: &BindGroupLayout,
     ) -> (Box<[f16]>, Texture, BindGroup) {
         // Set up half-precision spectrum data input
         let half_spectrum_data = std::iter::repeat(f16::default())
-            .take(surface_height as _)
+            .take(spectrum_texture_desc.size.height as _)
             .collect();
 
         // Set up spectrum texture and associated bind group
