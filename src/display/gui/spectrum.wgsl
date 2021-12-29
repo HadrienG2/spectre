@@ -14,30 +14,30 @@ struct VertexOutput {
     // Beware that position is given in [-1, 1] world coordinates
     // by the vertex shader, but translated into absolute screen
     // coordinates in pixels upon fragment shader invocation.
-    [[builtin(position)]] abs_pos: vec4<f32>;
+    [[ builtin(position) ]] abs_pos: vec4<f32>;
 
     // Relative horizontal position within the quad
-    [[location(0)]] rel_x: f32;
+    [[ location(0) ]] rel_x: f32;
 
-    // Instance index
-    [[location(1)]] instance_index: u32;
+    // Spectrogram write index (same for every vertex)
+    [[ location(1), interpolate(flat) ]] spectrogram_write_idx: u32;
 };
 
-[[stage(vertex)]]
+[[ stage(vertex) ]]
 fn vertex(
-    [[builtin(vertex_index)]] vertex_index: u32,
-    [[builtin(instance_index)]] instance_index: u32,
+    [[ builtin(vertex_index) ]] vertex_idx: u32,
+    [[ builtin(instance_index) ]] spectrogram_write_idx: u32,
 ) -> VertexOutput {
     // Emit a quad that covers the full screen height and a
     // uniform-configurable subset of the screen width.
-    let rel_x = f32(vertex_index % 2u);
-    let rel_y = f32(vertex_index / 2u);
+    let rel_x = f32(vertex_idx % 2u);
+    let rel_y = f32(vertex_idx / 2u);
     let x = -1.0 + 2.0 * settings.spectrum_width * rel_x;
     let y = 2.0 * rel_y - 1.0;
     return VertexOutput(
         vec4<f32>(x, y, 0.5, 1.0),
         rel_x,
-        instance_index
+        spectrogram_write_idx
     );
 }
 
@@ -57,8 +57,8 @@ var spectrum_texture: texture_1d<f32>;
 [[ group(2), binding(1) ]]
 var spectrogram_texture: texture_storage_2d<rgba16float, write>;
 
-[[stage(fragment)]]
-fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+[[ stage(fragment) ]]
+fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
     // Compute useful quantities from interpolated vertex output
     let rel_amp = -in.rel_x;
 
@@ -77,7 +77,7 @@ fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
     if (in.abs_pos.x < 1.0) {
         textureStore(
             spectrogram_texture,
-            vec2<i32>(i32(in.instance_index), i32(spectrum_abs_pos)),
+            vec2<i32>(i32(in.spectrogram_write_idx), i32(spectrum_abs_pos)),
             spectrum_color
         );
     }
