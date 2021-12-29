@@ -74,3 +74,11 @@ fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
         return spectrogram_color;
     }
 }
+
+// TODO: Add spectrogram upscaling and downscaling shaders. They are invoked
+//       once per texel of the largest spectrogram texture (input or output),
+//       with workgroups matching the vertical (spectrogram point) dimension.
+//       The upscaling shader does simple texture sampling, the downscaling
+//       shader performs integration by accumulating output in workgroup
+//       atomics, then first workgroup item sends accumulated bins into
+//       global memory via more atomics.
