@@ -7,7 +7,8 @@ use crate::{
 use log::{debug, error, info, trace};
 use wgpu::{
     Backends, Device, DeviceDescriptor, Features, Instance, Limits, PowerPreference, PresentMode,
-    Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureUsages,
+    Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, SurfaceTexture,
+    TextureUsages,
 };
 use winit::{
     dpi::PhysicalSize,
@@ -194,9 +195,9 @@ impl CoreContext {
         &self.queue
     }
 
-    /// Access the display surface
-    pub fn surface(&self) -> &Surface {
-        &self.surface
+    /// Try to access the current window surface texture
+    pub fn current_surface_texture(&self) -> Result<SurfaceTexture, SurfaceError> {
+        self.surface.get_current_texture()
     }
 
     /// Query current display surface configuration
