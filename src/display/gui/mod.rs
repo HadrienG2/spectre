@@ -384,7 +384,7 @@ impl GuiDisplay {
             // Some errors will just resolve themselves, perhaps with some help
             Err(SurfaceError::Timeout | SurfaceError::Outdated) => return Ok(()),
             Err(SurfaceError::Lost) => {
-                self.handle_resize();
+                self.core_context.recreate_surface();
                 return Ok(());
             }
 
@@ -489,8 +489,8 @@ impl GuiDisplay {
 
     /// Reallocate structures that depend on the window size after a resize
     fn handle_resize(&mut self) {
-        // Update core context
-        self.core_context.handle_resize();
+        // Recreate display surface
+        self.core_context.recreate_surface();
 
         // Update spectrogram display
         let spectrogram_texture_view = self.spectrogram.handle_resize(&self.core_context);

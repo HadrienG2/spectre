@@ -314,8 +314,8 @@ impl CoreContext {
         }
     }
 
-    /// Reset context that depend on the window size after a resize
-    pub fn handle_resize(&mut self) {
+    /// Recreate display surface, typically after a window resize
+    pub fn recreate_surface(&mut self) {
         self.surface.configure(&self.device, &self.surface_config);
     }
 }
