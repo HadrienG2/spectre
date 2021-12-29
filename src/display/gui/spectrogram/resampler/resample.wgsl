@@ -56,4 +56,14 @@ fn upscale_fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
     }
 }
 
-// TODO: Add downsampling compute shader
+[[ stage(compute), workgroup_size(1, 256) ]]
+fn downscale() {
+    // TODO: Each workgroup represents a set of pixels in the input image.
+    //       Input values are aggregated using atomics into a workgroup-local
+    //       array, which represents the matching pixels of the output image,
+    //       then a workgroup barrier is inserted, and there is one global
+    //       accumulation into the global storage buffer at the end. Finally,
+    //       the global storage buffer is copied into a texture to create the
+    //       new texture. Since WGPU only has integer atomics, we will need
+    //       another compute shader to do this, which does format conversion.
+}
