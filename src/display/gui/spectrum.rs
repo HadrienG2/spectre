@@ -302,7 +302,7 @@ impl Spectrum {
     ) -> (Box<[f16]>, Texture, BindGroup) {
         // Set up half-precision spectrum data input
         let f16_input = std::iter::repeat(f16::default())
-            .take(input_texture_desc.size.height as _)
+            .take(input_texture_desc.size.width as _)
             .collect();
 
         // Set up input texture and associated bind group
