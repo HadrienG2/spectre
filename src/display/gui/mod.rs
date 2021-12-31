@@ -265,9 +265,25 @@ impl GuiDisplay {
 
     /// Reallocate structures that depend on the window size after a resize
     fn handle_resize(&mut self) {
+        // Reallocate window surface
         self.core_context.recreate_surface();
-        let spectrogram_texture_view = self.spectrogram.handle_resize(&self.core_context);
+
+        // Resize spectrogram texture
+        let mut encoder =
+            self.core_context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Spectrum rescaling encoder"),
+                });
+        let spectrogram_texture_view = self
+            .spectrogram
+            .handle_resize(&self.core_context, &mut encoder);
+
+        // Resize live spectrum texture
         self.spectrum
             .handle_resize(&self.core_context, spectrogram_texture_view);
+
+        // Submit rescaling commands
+        self.core_context.queue().submit(Some(encoder.finish()));
     }
 }

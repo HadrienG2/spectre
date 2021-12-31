@@ -29,9 +29,9 @@ fn vertex(
     );
 }
 
-// Old spectrogram sampler with wrapping x axis
+// Spectrogram sampler with wrapping x axis
 [[ group(0), binding(0) ]]
-var old_spectrogram_sampler: sampler;
+var spectrogram_sampler: sampler;
 
 // Old spectrogram texture
 [[ group(1), binding(0) ]]
@@ -44,16 +44,16 @@ fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
     let shifted_x = f32(in.old_first_write_idx) + in.abs_pos.x;
     let rel_x = shifted_x / old_spectrogram_width;
     let old_spectrogram_color = textureSample(
-        spectrogram_texture,
+        old_spectrogram_texture,
         spectrogram_sampler,
-        vec2<f32>(rel_x, in.rel_y)
+        vec2<f32>(rel_x, 1.0 - in.rel_y)
     );
 
-    // ...but make sure newly created pixels are transparent
-    if (in.abs_pos_x < old_spectrogram_width) {
+    // ...but make sure newly created pixels are kept transparent
+    if (in.abs_pos.x < old_spectrogram_width) {
         return old_spectrogram_color;
     } else {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+        discard;
     }
 }
 

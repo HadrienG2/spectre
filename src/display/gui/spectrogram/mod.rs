@@ -1,17 +1,21 @@
 //! Spectrogram display
 
+mod resampler;
+
 use crate::display::gui::CoreContext;
 use std::time::{Duration, Instant};
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, BlendState,
-    ColorTargetState, ColorWrites, Device, Extent3d, FilterMode, FragmentState, FrontFace,
-    MultisampleState, PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology,
-    RenderPass, RenderPipeline, RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-    TextureViewDescriptor, TextureViewDimension, VertexState,
+    ColorTargetState, ColorWrites, CommandEncoder, Device, Extent3d, FilterMode, FragmentState,
+    FrontFace, MultisampleState, PipelineLayoutDescriptor, PolygonMode, PrimitiveState,
+    PrimitiveTopology, RenderPass, RenderPipeline, RenderPipelineDescriptor, SamplerBindingType,
+    SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
+
+use self::resampler::SpectrogramResampler;
 
 /// Spectrogram display
 pub struct Spectrogram {
@@ -41,6 +45,9 @@ pub struct Spectrogram {
 
     /// Current texture write index
     write_idx: u32,
+
+    /// Spectrogram rescaling engine
+    resampler: SpectrogramResampler,
 }
 //
 impl Spectrogram {
@@ -94,7 +101,9 @@ impl Spectrogram {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::STORAGE_BINDING
+                | TextureUsages::RENDER_ATTACHMENT,
         };
         //
         let texture_bind_group_layout =
@@ -172,6 +181,14 @@ impl Spectrogram {
         let scale_factor = core_context.scale_factor();
         let refresh_period = Duration::from_secs_f32(scale_factor / refresh_rate);
 
+        // Set up spectrogram rescaling
+        let resampler = SpectrogramResampler::new(
+            device,
+            &sampler_bind_group_layout,
+            &texture_bind_group_layout,
+            texture_desc.format,
+        );
+
         // ...and we're ready!
         (
             Self {
@@ -184,45 +201,44 @@ impl Spectrogram {
                 refresh_period,
                 last_refresh: Instant::now(),
                 write_idx: 0,
+                resampler,
             },
             texture_view,
         )
     }
 
     /// Handle window resize, return texture view to update spectrogram writer
-    pub fn handle_resize(&mut self, new_core_context: &CoreContext) -> TextureView {
-        // TODO: Don't just drop the old spectrogram texture, resample
-        //       it with extra shaders for nicer UX. This will almost
-        //       certainly require setting new usage flags in the descriptor.
-        //
-        //       Upscaling can be done with a very simple rendering pipeline
-        //       that essentially renders a full-screen quad from the sampled
-        //       old texture to the new texture. This rendering pipeline can
-        //       steal the bind groups of the main rendering pipeline.
-        //
-        //       Downscaling can be done with a compute shader whose workgroups
-        //       represent spectrogram line segments, with intermediate
-        //       aggregation done using workgroup-local atomics and final
-        //       merging using global memory atomics.
-        //
-        //       This functionality is complex enough that it deserves to be in
-        //       a submodule of this module.
+    pub fn handle_resize(
+        &mut self,
+        new_core_context: &CoreContext,
+        encoder: &mut CommandEncoder,
+    ) -> TextureView {
+        // Reallocate spectrogram texture
+        let old_texture_dims = (self.texture_desc.size.width, self.texture_desc.size.height);
+        let new_surface_config = new_core_context.surface_config();
+        self.texture_desc.size.width = new_surface_config.width as _;
+        self.texture_desc.size.height = new_surface_config.height as _;
+        let device = new_core_context.device();
+        let (new_texture, new_texture_view, new_texture_bind_group) =
+            Self::configure_texture(device, &self.texture_desc, &self.texture_bind_group_layout);
 
-        // Make sure the write index stays in range
-        let surface_config = new_core_context.surface_config();
-        self.write_idx = self.write_idx.min(surface_config.width - 1);
+        // Resample old spectrogram data into the new texture
+        self.write_idx = self.resampler.encode_rescale(
+            encoder,
+            &self.sampler_bind_group,
+            &self.texture_bind_group,
+            self.write_idx,
+            old_texture_dims,
+            &new_texture_view,
+            (self.texture_desc.size.width, self.texture_desc.size.height),
+        );
 
         // Update size-dependent GPU state
-        self.texture_desc.size.width = surface_config.width as _;
-        self.texture_desc.size.height = surface_config.height as _;
-        let device = new_core_context.device();
-        let (texture, texture_view, texture_bind_group) =
-            Self::configure_texture(device, &self.texture_desc, &self.texture_bind_group_layout);
-        self.texture = texture;
-        self.texture_bind_group = texture_bind_group;
+        self.texture = new_texture;
+        self.texture_bind_group = new_texture_bind_group;
 
         // Bubble up spectrogram texture view to update the writer
-        texture_view
+        new_texture_view
     }
 
     /// Handle DPI scale factor change
