@@ -2,6 +2,10 @@
 [[ group(0), binding(0) ]]
 var old_spectrogram_sampler: sampler;
 
+// Old spectrogram texture
+[[ group(1), binding(0) ]]
+var old_spectrogram_texture: texture_2d<f32>;
+
 struct SettingsUniform {
     // Last write index of the old spectrogram, minus (minimum of the width of
     // the old and new spectrograms)-1, wrapped by old spectrogram width
@@ -11,14 +15,14 @@ struct SettingsUniform {
     new_spectrogram_width: u32,
 };
 //
-[[ group(0), binding(1) ]]
+[[ group(2), binding(0) ]]
 var<uniform> settings: SettingsUniform;
 
-// Old spectrogram texture
-[[ group(1), binding(0) ]]
-var old_spectrogram_texture: texture_2d<f32>;
-
 // Minimal workgroup size requirement from WebGPU downlevel defaults
+//
+// FIXME: Must be kept in sync with mod.rs since WebGPU does not allow setting
+//        specialization constants yet.
+//
 let workgroup_len: u32 = 256;
 
 // rgba16 pixel emulated using u32 atomics
@@ -28,7 +32,7 @@ struct AtomicRgba16 {
 };
 
 // New spectrogram buffer, must be in rgba16float format
-[[ group(1), binding(1) ]]
+[[ group(3), binding(0) ]]
 var<storage, read_write> new_spectrogram_buffer: array<AtomicRgba16>;
 
 // Workgroup-local new spectrogram accumulator, can be in any rgba16 format and

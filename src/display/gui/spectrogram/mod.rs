@@ -15,8 +15,8 @@ use wgpu::{
 
 /// Spectrogram display
 pub struct Spectrogram {
-    /// Bind group for resources that are valid forever
-    static_bind_group: BindGroup,
+    /// Bind group for the spectrogram sampler
+    sampler_bind_group: BindGroup,
 
     /// Spectrogram texture
     texture: Texture,
@@ -24,11 +24,11 @@ pub struct Spectrogram {
     /// Spectrogram texture descriptor (to recreate it on window resize)
     texture_desc: TextureDescriptor<'static>,
 
-    /// Bind group for resources that are recreated on window resize
-    sized_bind_group: BindGroup,
+    /// Bind group for the texture (it's recreated on window resize)
+    texture_bind_group: BindGroup,
 
-    /// Size-sensitive bind group layout (to recreate it on window resize)
-    sized_bind_group_layout: BindGroupLayout,
+    /// Texture bind group layout (to recreate it on window resize)
+    texture_bind_group_layout: BindGroupLayout,
 
     /// Render pipeline
     pipeline: RenderPipeline,
@@ -51,7 +51,7 @@ impl Spectrogram {
         settings_bind_group_layout: &BindGroupLayout,
         refresh_rate: f32,
     ) -> (Self, TextureView) {
-        // Set up spectrogram texture sampling & static bind group
+        // Set up spectrogram texture sampling & associated bind group
         let device = core_context.device();
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("Spectrogram sampler"),
@@ -61,9 +61,9 @@ impl Spectrogram {
             ..Default::default()
         });
         //
-        let static_bind_group_layout =
+        let sampler_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("Spectrogram static bind group layout"),
+                label: Some("Spectrogram sampler bind group layout"),
                 entries: &[BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::FRAGMENT,
@@ -72,16 +72,16 @@ impl Spectrogram {
                 }],
             });
         //
-        let static_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Spectrogram static bind group"),
-            layout: &static_bind_group_layout,
+        let sampler_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrogram sampler bind group"),
+            layout: &sampler_bind_group_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
                 resource: BindingResource::Sampler(&sampler),
             }],
         });
 
-        // Set up spectrogram texture & size-dependent bind group
+        // Set up spectrogram texture & associated bind group
         let surface_config = core_context.surface_config();
         let texture_desc = TextureDescriptor {
             label: Some("Spectrogram texture"),
@@ -97,22 +97,23 @@ impl Spectrogram {
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
         };
         //
-        let sized_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Spectrogram size-sensitive bind group layout"),
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Texture {
-                    sample_type: TextureSampleType::Float { filterable: true },
-                    view_dimension: TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            }],
-        });
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("Spectrogram texture bind group layout"),
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+            });
         //
-        let (texture, texture_view, sized_bind_group) =
-            Self::configure_sized_data(device, &texture_desc, &sized_bind_group_layout);
+        let (texture, texture_view, texture_bind_group) =
+            Self::configure_texture(device, &texture_desc, &texture_bind_group_layout);
 
         // Load shader
         let shader = device.create_shader_module(&ShaderModuleDescriptor {
@@ -125,8 +126,8 @@ impl Spectrogram {
             label: Some("Spectrogram pipeline layout"),
             bind_group_layouts: &[
                 &settings_bind_group_layout,
-                &static_bind_group_layout,
-                &sized_bind_group_layout,
+                &sampler_bind_group_layout,
+                &texture_bind_group_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -176,9 +177,9 @@ impl Spectrogram {
             Self {
                 texture,
                 texture_desc,
-                static_bind_group,
-                sized_bind_group,
-                sized_bind_group_layout,
+                sampler_bind_group,
+                texture_bind_group,
+                texture_bind_group_layout,
                 pipeline,
                 refresh_period,
                 last_refresh: Instant::now(),
@@ -215,10 +216,10 @@ impl Spectrogram {
         self.texture_desc.size.width = surface_config.width as _;
         self.texture_desc.size.height = surface_config.height as _;
         let device = new_core_context.device();
-        let (texture, texture_view, sized_bind_group) =
-            Self::configure_sized_data(device, &self.texture_desc, &self.sized_bind_group_layout);
+        let (texture, texture_view, texture_bind_group) =
+            Self::configure_texture(device, &self.texture_desc, &self.texture_bind_group_layout);
         self.texture = texture;
-        self.sized_bind_group = sized_bind_group;
+        self.texture_bind_group = texture_bind_group;
 
         // Bubble up spectrogram texture view to update the writer
         texture_view
@@ -244,31 +245,31 @@ impl Spectrogram {
     /// Assumes that UI settings are bound to bind group 0
     ///
     pub fn draw<'a>(&'a self, render_pass: &mut RenderPass<'a>) {
-        render_pass.set_bind_group(1, &self.static_bind_group, &[]);
-        render_pass.set_bind_group(2, &self.sized_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.sampler_bind_group, &[]);
+        render_pass.set_bind_group(2, &self.texture_bind_group, &[]);
         render_pass.set_pipeline(&self.pipeline);
         render_pass.draw(0..4, self.write_idx..self.write_idx + 1);
     }
 
     /// (Re)configure size-dependent entities
-    fn configure_sized_data(
+    fn configure_texture(
         device: &Device,
         texture_desc: &TextureDescriptor,
-        sized_bind_group_layout: &BindGroupLayout,
+        texture_bind_group_layout: &BindGroupLayout,
     ) -> (Texture, TextureView, BindGroup) {
         let texture = device.create_texture(texture_desc);
         let texture_view = texture.create_view(&TextureViewDescriptor {
             label: Some("Spectrogram texture view"),
             ..Default::default()
         });
-        let sized_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Spectrogram size-sensitive bind group"),
-            layout: sized_bind_group_layout,
+        let texture_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Spectrogram texture bind group"),
+            layout: texture_bind_group_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
                 resource: BindingResource::TextureView(&texture_view),
             }],
         });
-        (texture, texture_view, sized_bind_group)
+        (texture, texture_view, texture_bind_group)
     }
 }

@@ -2,10 +2,10 @@ mod audio;
 mod display;
 mod fourier;
 pub mod math;
-mod resample;
+mod resampler;
 
 use crate::{
-    audio::AudioSetup, display::FrameResult, fourier::SteadyQTransform, resample::FourierResampler,
+    audio::AudioSetup, display::FrameResult, fourier::SteadyQTransform, resampler::FourierResampler,
 };
 use log::{debug, error};
 use rt_history::Overrun;
