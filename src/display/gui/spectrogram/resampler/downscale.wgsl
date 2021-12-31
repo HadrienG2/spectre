@@ -8,8 +8,8 @@ struct SettingsUniform {
     // the old and new spectrograms)-1, wrapped by old spectrogram width
     old_first_write_idx: u32;
 
-    // Width of the new spectrogram
-    new_spectrogram_width: u32;
+    // Stride between rows of the new spectrogram
+    new_spectrogram_stride: u32;
 };
 //
 [[ group(1), binding(0) ]]
@@ -64,7 +64,7 @@ fn load_input(pos: vec2<u32>) -> vec4<f32> {
 // Determine of the height of the new spectrogram
 fn new_spectrogram_height() -> u32 {
     let new_spectrogram_len = arrayLength(&new_spectrogram_buffer.texels);
-    return new_spectrogram_len / settings.new_spectrogram_width;
+    return new_spectrogram_len / settings.new_spectrogram_stride;
 }
 
 // Determine how many fractional output texels each input texel maps into
@@ -122,7 +122,7 @@ fn load_accumulator(local_idx: u32) -> vec4<f32> {
 
 // Compute output storage buffer index associated with a certain output position
 fn output_idx(out_pos: vec2<u32>) -> u32 {
-    return out_pos.y * settings.new_spectrogram_width + out_pos.x;
+    return out_pos.y * settings.new_spectrogram_stride + out_pos.x;
 }
 
 // Merge accumulated contribution into a texel of the output storage buffer
@@ -132,8 +132,8 @@ fn merge_accumulator(acc: vec4<f32>, out_pos: vec2<u32>) {
     let sub_accs_ptr = &sub_accs;
     for (var i: i32 = 0; i < 2; i = i+1) {
         // Simulate a 2xf16 atomic add using u32 swap
-        // FIXME: atomicCompareExchangeWeak would be better but is not
-        //        implemented yet, see https://github.com/gfx-rs/naga/issues/1413
+        // FIXME: atomicCompareExchangeWeak is better, but not implemented,
+        //        see https://github.com/gfx-rs/naga/issues/1413
         let target = &new_spectrogram_buffer.texels[out_idx].rg_ba[i];
         var sub_acc: vec2<f32> = (*sub_accs_ptr)[i];
         var expected_old_u32: u32 = atomicLoad(target);
@@ -176,7 +176,8 @@ fn store_accumulator(acc: vec4<f32>, out_pos: vec2<u32>) {
 // Last write index of the new spectrogram will be (minimum of the width of the
 // old and new spectrograms)-1.
 //
-// FIXME: WGSL spec says workgroup_len should be accepted here, but it isn't
+// FIXME: WGSL spec says workgroup_len should be accepted as a parameter to the
+//        workgroup_size attribute, but it currently isn't accepted by wgpu.
 [[ stage(compute), workgroup_size(1u, 256u) ]]
 fn downscale(
     [[ builtin(local_invocation_index) ]] local_idx: u32,

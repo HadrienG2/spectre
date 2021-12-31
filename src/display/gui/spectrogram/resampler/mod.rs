@@ -24,8 +24,8 @@ struct DownscaleSettings {
     // the old and new spectrograms)-1, wrapped by old spectrogram width
     old_first_write_idx: u32,
 
-    // Width of the new spectrogram
-    new_spectrogram_width: u32,
+    // Stride between rows of the new spectrogram
+    new_spectrogram_stride: u32,
 }
 
 /// Downscaling workgroup length
@@ -292,7 +292,7 @@ impl SpectrogramResampler {
         // Update the downscaling settings
         self.downscale_settings.replace(DownscaleSettings {
             old_first_write_idx,
-            new_spectrogram_width: bytes_per_row / bytes_per_texel,
+            new_spectrogram_stride: bytes_per_row / bytes_per_texel,
         });
         let settings_bind_group = self.downscale_settings.updated(core_context.queue());
 
