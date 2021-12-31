@@ -211,6 +211,7 @@ impl SpectrogramResampler {
                 encoder,
                 old_texture_bind_group,
                 old_first_write_idx,
+                old_texture_height,
                 new_texture,
                 (new_texture_width, new_texture_height),
             );
@@ -263,6 +264,7 @@ impl SpectrogramResampler {
         encoder: &mut CommandEncoder,
         old_texture_bind_group: &BindGroup,
         old_first_write_idx: u32,
+        old_texture_height: u32,
         new_texture: &Texture,
         (new_texture_width, new_texture_height): (u32, u32),
     ) {
@@ -307,7 +309,7 @@ impl SpectrogramResampler {
             compute_pass.set_pipeline(&self.downscale_pipeline);
             compute_pass.dispatch(
                 new_texture_width,
-                div_round_up(new_texture_height, DOWNSCALE_WORKGROUP_LEN),
+                div_round_up(old_texture_height, DOWNSCALE_WORKGROUP_LEN),
                 1,
             );
         }
