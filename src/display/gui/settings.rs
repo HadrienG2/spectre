@@ -9,29 +9,16 @@ use wgpu::{
     BufferUsages, Device, Queue, ShaderStages,
 };
 
-/// Default fraction of the window used by the live spectrum
-const DEFAULT_SPECTRUM_WIDTH: f32 = 0.25;
-
-/// Uniform for passing UI settings to GPU shaders
+/// Shader settings management
 //
 // NOTE: According to the Learn WGPU tutorial...
 //       "To make uniform buffers portable they have to be std140 and not
 //       std430. Uniform structs have to be std140. Storage structs have to be
 //       std430. Storage buffers for compute shaders can be std140 or std430."
 //
-#[derive(AsStd140)]
-struct Uniform {
-    /// Horizontal fraction of the window that is occupied by the live spectrum
-    spectrum_width: f32,
-
-    /// Range of amplitudes that we can display in dB
-    amp_scale: f32,
-}
-
-/// Shader settings management
-pub struct Settings {
+pub struct SettingsUniform<T: AsStd140> {
     /// UI settings
-    uniform: Uniform,
+    uniform: T,
 
     /// Buffer for holding UI settings on the device
     buffer: Buffer,
@@ -43,15 +30,12 @@ pub struct Settings {
     updated: bool,
 }
 //
-impl Settings {
+impl<T: AsStd140> SettingsUniform<T> {
     /// Set up GPU settings handling, provide the associated bind group layout
     /// for client shader setup
-    pub fn new(device: &Device, amp_scale: f32) -> (Self, BindGroupLayout) {
+    pub fn new(device: &Device, initial: T, visibility: ShaderStages) -> (Self, BindGroupLayout) {
         // Set up UI settings storage
-        let uniform = Uniform {
-            spectrum_width: DEFAULT_SPECTRUM_WIDTH,
-            amp_scale,
-        };
+        let uniform = initial;
 
         // Set up associated buffer
         let buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -65,11 +49,11 @@ impl Settings {
             label: Some("Settings bind group layout"),
             entries: &[BindGroupLayoutEntry {
                 binding: 0,
-                visibility: ShaderStages::VERTEX_FRAGMENT,
+                visibility,
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(std::mem::size_of::<Uniform>() as u64),
+                    min_binding_size: NonZeroU64::new(std::mem::size_of::<T>() as u64),
                 },
                 count: None,
             }],

@@ -6,6 +6,7 @@ var old_spectrogram_sampler: sampler;
 [[ group(1), binding(0) ]]
 var old_spectrogram_texture: texture_2d<f32>;
 
+// Must be kept in sync with the main program
 struct SettingsUniform {
     // Last write index of the old spectrogram, minus (minimum of the width of
     // the old and new spectrograms)-1, wrapped by old spectrogram width
@@ -20,8 +21,8 @@ var<uniform> settings: SettingsUniform;
 
 // Minimal workgroup size requirement from WebGPU downlevel defaults
 //
-// FIXME: Must be kept in sync with mod.rs since WebGPU does not allow setting
-//        specialization constants yet.
+// Must be kept in sync with mod.rs since WebGPU does not allow setting
+// specialization constants yet.
 //
 let workgroup_len: u32 = 256;
 

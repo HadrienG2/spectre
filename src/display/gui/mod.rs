@@ -7,13 +7,14 @@ mod spectrogram;
 mod spectrum;
 
 use self::{
-    core::HighLevelEvent, settings::Settings, spectrogram::Spectrogram, spectrum::Spectrum,
+    core::HighLevelEvent, settings::SettingsUniform, spectrogram::Spectrogram, spectrum::Spectrum,
 };
 use crate::{
     display::{FrameInput, FrameResult},
     Result,
 };
-use wgpu::{SurfaceError, TextureViewDescriptor};
+use crevice::std140::AsStd140;
+use wgpu::{ShaderStages, SurfaceError, TextureViewDescriptor};
 use winit::event_loop::ControlFlow;
 
 /// Re-export core context type for child modules
@@ -24,6 +25,22 @@ type CustomEvent = ();
 type EventLoop = winit::event_loop::EventLoop<CustomEvent>;
 type Event<'a> = winit::event::Event<'a, CustomEvent>;
 
+/// Default fraction of the window used by the live spectrum
+const DEFAULT_SPECTRUM_WIDTH: f32 = 0.25;
+
+/// Uniform for passing UI settings to rendering shaders
+///
+/// Must be kept in sync with the rendering shaders
+///
+#[derive(AsStd140)]
+struct Settings {
+    /// Horizontal fraction of the window that is occupied by the live spectrum
+    spectrum_width: f32,
+
+    /// Range of amplitudes that we can display in dB
+    amp_scale: f32,
+}
+
 /// GPU-accelerated spectrum display
 pub struct GuiDisplay {
     /// Event loop
@@ -33,7 +50,7 @@ pub struct GuiDisplay {
     core_context: CoreContext,
 
     /// UI settings
-    settings: Settings,
+    settings: SettingsUniform<Settings>,
 
     /// Spectrogram renderer
     spectrogram: Spectrogram,
@@ -55,7 +72,14 @@ impl GuiDisplay {
 
         // Set up GPU UI settings
         let device = core_context.device();
-        let (settings, settings_bind_group_layout) = Settings::new(device, amp_scale);
+        let (settings, settings_bind_group_layout) = SettingsUniform::new(
+            device,
+            Settings {
+                spectrum_width: DEFAULT_SPECTRUM_WIDTH,
+                amp_scale,
+            },
+            ShaderStages::VERTEX_FRAGMENT,
+        );
 
         // Set up spectrogram
         let (spectrogram, spectrogram_texture_view) = Spectrogram::new(
