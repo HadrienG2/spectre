@@ -33,20 +33,25 @@ pub struct SettingsUniform<T: AsStd140> {
 impl<T: AsStd140> SettingsUniform<T> {
     /// Set up GPU settings handling, provide the associated bind group layout
     /// for client shader setup
-    pub fn new(device: &Device, initial: T, visibility: ShaderStages) -> (Self, BindGroupLayout) {
+    pub fn new(
+        device: &Device,
+        initial: T,
+        visibility: ShaderStages,
+        name: &str,
+    ) -> (Self, BindGroupLayout) {
         // Set up UI settings storage
         let uniform = initial;
 
         // Set up associated buffer
         let buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Settings uniform"),
+            label: Some(&format!("{} settings uniform", name)),
             contents: uniform.as_std140().as_bytes(),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
         // Set up associated bind group
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Settings bind group layout"),
+            label: Some(&format!("{} settings bind group layout", name)),
             entries: &[BindGroupLayoutEntry {
                 binding: 0,
                 visibility,
@@ -60,7 +65,7 @@ impl<T: AsStd140> SettingsUniform<T> {
         });
         //
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Settings bind group"),
+            label: Some(&format!("{} settings bind group", name)),
             layout: &bind_group_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
@@ -82,6 +87,12 @@ impl<T: AsStd140> SettingsUniform<T> {
             },
             bind_group_layout,
         )
+    }
+
+    /// Completely replace old settings with new ones
+    pub fn replace(&mut self, new: T) {
+        self.uniform = new;
+        self.updated = true;
     }
 
     /// Update settings if needed, get the associated bind group

@@ -5,9 +5,7 @@ mod settings;
 mod spectrogram;
 mod spectrum;
 
-use self::{
-    core::HighLevelEvent, settings::SettingsUniform, spectrogram::Spectrogram, spectrum::Spectrum,
-};
+use self::{core::HighLevelEvent, spectrogram::Spectrogram, spectrum::Spectrum};
 use crate::{
     display::{FrameInput, FrameResult},
     Result,
@@ -16,8 +14,9 @@ use crevice::std140::AsStd140;
 use wgpu::{ShaderStages, SurfaceError, TextureViewDescriptor};
 use winit::event_loop::ControlFlow;
 
-/// Re-export core context type for child modules
+/// Re-export some utility types for child modules
 pub(self) use self::core::CoreContext;
+pub(self) use self::settings::SettingsUniform;
 
 /// Custom winit event type
 type CustomEvent = ();
@@ -78,6 +77,7 @@ impl GuiDisplay {
                 amp_scale,
             },
             ShaderStages::VERTEX_FRAGMENT,
+            "Main",
         );
 
         // Set up spectrogram

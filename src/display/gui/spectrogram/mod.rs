@@ -103,7 +103,8 @@ impl Spectrogram {
             format: TextureFormat::Rgba16Float,
             usage: TextureUsages::TEXTURE_BINDING
                 | TextureUsages::STORAGE_BINDING
-                | TextureUsages::RENDER_ATTACHMENT,
+                | TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::COPY_DST,
         };
         //
         let texture_bind_group_layout =
@@ -111,7 +112,7 @@ impl Spectrogram {
                 label: Some("Spectrogram texture bind group layout"),
                 entries: &[BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT | ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
                         sample_type: TextureSampleType::Float { filterable: true },
                         view_dimension: TextureViewDimension::D2,
@@ -224,12 +225,13 @@ impl Spectrogram {
 
         // Resample old spectrogram data into the new texture
         self.write_idx = self.resampler.encode_rescale(
+            new_core_context,
             encoder,
             &self.sampler_bind_group,
             &self.texture_bind_group,
             self.write_idx,
             old_texture_dims,
-            &new_texture_view,
+            &new_texture,
             (self.texture_desc.size.width, self.texture_desc.size.height),
         );
 
