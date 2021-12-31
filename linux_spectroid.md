@@ -2,45 +2,9 @@
 
 ## Algorithme
 
-### Thread DSP
-
 * _TODO: Ajouter algos de réduction de bruit FFT basés sur la conservation d'un
   tampon circulaire d'amplitudes FFTs précédentes ici + regarder la tronche du
   bruit et en fonction essayer median filtering ou autre_.
-* 
-
-### Thread graphique/événements
-
-* Récupère les données du thread DSP dans sa "ring matrix" interne, de la taille
-  de la longueur de l'historique affiché à l'écran en pixels, et les marque
-  comme lues pour le thread DSP.
-    * Si des données ont été perdues par buffer overrun, marquer les lignes
-      correspondantes de la ring matrix à zéro.
-* Copier l'ensemble de la ring matrix sur le GPU _(pour la v1, ensuite on
-  essaiera d'être plus futé et de ne copier que ce qui a changé)_ comme texture
-  avec interpolation linéaire, en "linéarisant" au passage.
-* Afficher un quad avec un fragment shader qui...
-    * Accède à la texture des amplitudes FFT en échelle log.
-    * Traduit les amplitudes en couleurs via une fonction palette.
-    * _Après la v1, essayer de ne rafraîchir que ce qui a changé._
-* _En-dehors des événements graphiques, gèrera à terme les événements associés
-  aux interactions utilisateur, par exemple on pourrait imaginer que quand on
-  appuie sur "+", ça augmente la résolution temporelle en augmentant la
-  fréquence du thread DSP, et quand on appuie sur "-", ça la diminue._
-    * _Certaines interactions, entre autres les redimensionnements de fenêtres,
-      vont nécessiter des réallocations. Il va falloir de l'algorithmique
-      lock-free assez chiadée pour gérer ça sans interrompre l'acquisition ni
-      introduire des locks dans les threads temps réel... donc ce sera pas pour
-      la v1. Et ce d'autant plus qu'il faudra offloader les trucs qui ne sont
-      pas RT-safe, comme les allocations mémoire, à un autre thread avec de la
-      synchro lock-free, ce qui va pas non plus être fun..._
-    * _Une interaction "facile" et assez sympa serait de permettre le réglage
-      de l'échelle verticale par cliquer-glisser sur le spectre live, le
-      changement d'échelle s'appliquant aussi au spectrogramme, avec un reset
-      des deux échelles possible via clic droit au même endroit_.
-* Retourne attendre des événements.
-* 
-
 
 ## Planif développement
 
@@ -98,4 +62,3 @@
       l'intensité de couleur correspond à la variation de niveau sonore perçu.
 * [ ] Ping Carl Reinke, l'auteur de spectroid, sur LinkedIn pour lui
   faire part de ma réalisation.
-* 
