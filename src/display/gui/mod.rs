@@ -1,5 +1,4 @@
 //! WebGPU-based spectrum display
-// FIXME: This module is getting very long and should be split into smaller entities
 
 mod core;
 mod settings;

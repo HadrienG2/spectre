@@ -24,9 +24,6 @@ const REMOVE_DC: bool = true;
 /// a weighted average of radix-2 FFTs, and the second problem by bounding
 /// the set of radix-2 FFTs that we will use for STFT to a useful amount.
 ///
-// FIXME: This currently computes obviously wrong results (no activity in bins
-//        on the right), figure out why.
-//
 pub struct SteadyQTransform {
     /// Radix-2 FFTs used to approximate the constant-Q transform, and frequency
     /// bin of the base (first) FFT on which each one is considered optimal.
