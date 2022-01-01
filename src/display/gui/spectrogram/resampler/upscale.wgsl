@@ -42,7 +42,7 @@ fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
     // Probe old spectrogram at a position matching new spectrogram location...
     let old_spectrogram_width = f32(textureDimensions(old_spectrogram_texture).x);
     let shifted_x = f32(in.old_first_write_idx) + in.abs_pos.x;
-    let rel_x = shifted_x / old_spectrogram_width;
+    let rel_x = shifted_x / (old_spectrogram_width - 1.0);
     let old_spectrogram_color = textureSample(
         old_spectrogram_texture,
         spectrogram_sampler,
