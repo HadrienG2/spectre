@@ -1,15 +1,4 @@
-// Must be kept in sync with other shaders & main program
-struct SettingsUniform {
-    // Horizontal fraction of the window that is occupied by the live spectrum
-    // TODO: Allow adjusting this with mouse controls (with <-> mouse cursor UX)
-    spectrum_width: f32;
-
-    // Range of amplitudes that we can display
-    amp_scale: f32;
-};
-//
-[[ group(0), binding(0) ]]
-var<uniform> settings: SettingsUniform;
+// === Paste settings.wgsl here ===
 
 struct VertexOutput {
     // Beware that position is given in [-1, 1] world coordinates
@@ -33,7 +22,7 @@ fn vertex(
     // uniform-configurable subset of the screen width.
     let rel_x = f32(vertex_idx % 2u);
     let rel_y = f32(vertex_idx / 2u);
-    let x = -1.0 + 2.0 * settings.spectrum_width * rel_x;
+    let x = 2.0 * rel_x * settings.spectrum_width - 1.0;
     let y = 2.0 * rel_y - 1.0;
     return VertexOutput(
         vec4<f32>(x, y, 0.5, 1.0),
@@ -64,9 +53,9 @@ fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
     let rel_amp = -in.rel_x;
 
     // Find spectrum amplitude at current vertical position
-    let spectrum_len = f32(textureDimensions(spectrum_texture));
-    let spectrum_abs_pos = spectrum_len - in.abs_pos.y - 1.0;
-    let spectrum_rel_pos = spectrum_abs_pos / (spectrum_len - 1.0);
+    let spectrum_len_m1 = f32(textureDimensions(spectrum_texture)) - 1.0;
+    let spectrum_abs_pos = spectrum_len_m1 - in.abs_pos.y;
+    let spectrum_rel_pos = spectrum_abs_pos / spectrum_len_m1;
     let spectrum_amp = textureSample(spectrum_texture, spectrum_sampler, spectrum_rel_pos).x;
     let spectrum_color = textureSample(
         palette_texture,

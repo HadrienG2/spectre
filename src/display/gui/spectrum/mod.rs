@@ -44,6 +44,7 @@ impl Spectrum {
     pub fn new(
         core_context: &CoreContext,
         settings_bind_group_layout: &BindGroupLayout,
+        settings_src: &'static str,
         spectrogram_texture_view: TextureView,
     ) -> Self {
         // Set up input texture sampling
@@ -171,9 +172,11 @@ impl Spectrum {
         });
 
         // Load live spectrum shader
+        let mut shader_src = settings_src.to_owned();
+        shader_src.push_str(include_str!("render.wgsl"));
         let shader = device.create_shader_module(&ShaderModuleDescriptor {
             label: Some("Spectrum rendering shaders"),
-            source: ShaderSource::Wgsl(include_str!("render.wgsl").into()),
+            source: ShaderSource::Wgsl(shader_src.into()),
         });
 
         // Set up spectrum pipeline layout

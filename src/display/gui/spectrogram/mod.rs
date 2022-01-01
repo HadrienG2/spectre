@@ -56,6 +56,7 @@ impl Spectrogram {
     pub fn new(
         core_context: &CoreContext,
         settings_bind_group_layout: &BindGroupLayout,
+        settings_src: &'static str,
         refresh_rate: f32,
     ) -> (Self, TextureView) {
         // Set up spectrogram texture sampling & associated bind group
@@ -126,9 +127,11 @@ impl Spectrogram {
             Self::configure_texture(device, &texture_desc, &texture_bind_group_layout);
 
         // Load shader
+        let mut shader_src = settings_src.to_owned();
+        shader_src.push_str(include_str!("render.wgsl"));
         let shader = device.create_shader_module(&ShaderModuleDescriptor {
             label: Some("Spectrogram rendering shaders"),
-            source: ShaderSource::Wgsl(include_str!("render.wgsl").into()),
+            source: ShaderSource::Wgsl(shader_src.into()),
         });
 
         // Set up pipeline layout

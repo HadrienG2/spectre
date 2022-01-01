@@ -79,11 +79,13 @@ impl GuiDisplay {
             ShaderStages::VERTEX_FRAGMENT,
             "Main",
         );
+        let settings_src = include_str!("settings.wgsl");
 
         // Set up spectrogram
         let (spectrogram, spectrogram_texture_view) = Spectrogram::new(
             &core_context,
             &settings_bind_group_layout,
+            settings_src,
             spectrogram_refresh_rate,
         );
 
@@ -91,6 +93,7 @@ impl GuiDisplay {
         let spectrum = Spectrum::new(
             &core_context,
             &settings_bind_group_layout,
+            settings_src,
             spectrogram_texture_view,
         );
 

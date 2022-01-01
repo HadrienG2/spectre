@@ -1,15 +1,4 @@
-// Must be kept in sync with other shaders & main program
-struct SettingsUniform {
-    // Horizontal fraction of the window that is occupied by the live spectrum
-    // TODO: Allow adjusting this with mouse controls (with <-> mouse cursor UX)
-    spectrum_width: f32;
-
-    // Range of amplitudes that we can display
-    amp_scale: f32;
-};
-//
-[[ group(0), binding(0) ]]
-var<uniform> settings: SettingsUniform;
+// === Paste settings.wgsl here ===
 
 struct VertexOutput {
     // Beware that position is given in [-1, 1] world coordinates
@@ -33,7 +22,7 @@ fn vertex(
     // uniform-configurable subset of the screen width.
     let rel_x = f32(vertex_idx % 2u);
     let rel_y = f32(vertex_idx / 2u);
-    let x = -1.0 + 2.0 * settings.spectrum_width * (1.0 - rel_x) + 2.0 * rel_x;
+    let x = 2.0 * (settings.spectrum_width + rel_x * (1.0 - settings.spectrum_width)) - 1.0;
     let y = 2.0 * rel_y - 1.0;
     return VertexOutput(
         vec4<f32>(x, y, 0.5, 1.0),
@@ -61,7 +50,7 @@ fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
 
     // Load data from spectrogram texture
     let shifted_x = f32(in.last_write_idx) - corrected_x;
-    let rel_x = shifted_x / total_width;
+    let rel_x = shifted_x / (total_width - 1.0);
     let spectrogram_color = textureSample(
         spectrogram_texture,
         spectrogram_sampler,
@@ -70,7 +59,7 @@ fn fragment(in: VertexOutput) -> [[ location(0) ]] vec4<f32> {
 
     // Render the first column white to separate live spectrum vs spectrogram
     if (corrected_x < 1.0) {
-        return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+        return vec4<f32>(1.0);
     } else {
         return spectrogram_color;
     }
