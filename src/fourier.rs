@@ -394,7 +394,7 @@ impl FourierTransform {
         };
 
         // Pre-normalize the window function so that output is normalized
-        let output_norm = 2.0 / math::sum_f32(&window[..]);
+        let output_norm = 2.0 / math::sum_f32_fast(&window[..]);
         for x in window.iter_mut() {
             *x *= output_norm;
         }

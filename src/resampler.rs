@@ -47,7 +47,8 @@ fn integrate(f: &[f32], start: f32, end: f32) -> f32 {
         // Contribution from the bins surrounded by (start, end)
         let middle_contrib = if before_end > after_start {
             // Integrating across at least one integer bin
-            0.5 * (f[after_start] + f[before_end]) + math::sum_f32(&f[after_start + 1..before_end])
+            0.5 * (f[after_start] + f[before_end])
+                + math::sum_f32_fast(&f[after_start + 1..before_end])
         } else {
             // Integrating across one bin border only
             0.0

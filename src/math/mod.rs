@@ -4,7 +4,7 @@ mod simd;
 
 use realfft::num_complex::Complex;
 
-pub use simd::sum_f32;
+pub use simd::sum_f32_fast;
 
 /// Interpolate a table of complex numbers into a series that is ~Nx larger
 pub fn interpolate_c32(
