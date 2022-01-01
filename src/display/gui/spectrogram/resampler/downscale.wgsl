@@ -216,7 +216,7 @@ fn downscale(
     // Wait for accumulator initialization to be finished
     workgroupBarrier();
 
-    // Do these fall into the same texel or two consecutive texels?
+    // Do start and end fall into the same texel or two consecutive texels?
     let first_idx = u32(local_y_start);
     let second_idx = u32(local_y_end);
     if (first_idx == second_idx) {
