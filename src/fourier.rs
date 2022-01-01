@@ -414,7 +414,7 @@ impl FourierTransform {
     fn prepare_input(&mut self) {
         // Remove DC offset if configured to do so
         if REMOVE_DC {
-            let average = math::sum_f32(&self.input[..]) / self.input.len() as f32;
+            let average = math::sum_f32_fast(&self.input[..]) / self.input.len() as f32;
             self.input.iter_mut().for_each(|elem| *elem -= average);
         }
     }
