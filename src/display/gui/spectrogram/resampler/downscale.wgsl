@@ -1,7 +1,3 @@
-// Old spectrogram texture
-[[ group(0), binding(0) ]]
-var old_spectrogram_texture: texture_2d<f32>;
-
 // Must be kept in sync with the main program
 struct SettingsUniform {
     // Last write index of the old spectrogram, minus (minimum of the width of
@@ -12,17 +8,12 @@ struct SettingsUniform {
     new_spectrogram_stride: u32;
 };
 //
-[[ group(1), binding(0) ]]
+[[ group(0), binding(0) ]]
 var<uniform> settings: SettingsUniform;
 
-// Minimal workgroup size requirement from WebGPU downlevel defaults
-//
-// Must be kept in sync with mod.rs since WebGPU does not allow setting
-// specialization constants yet.
-//
-// FIXME: Sync up workgroup length in workgroup_size attribute below
-let workgroup_len: u32 = 256u;
-let workgroup_len_p1: u32 = 257u;
+// Old spectrogram texture
+[[ group(1), binding(0) ]]
+var old_spectrogram_texture: texture_2d<f32>;
 
 // rgba16 pixel emulated using u32 atomics
 struct AtomicRgba16 {
@@ -37,6 +28,15 @@ struct AtomicRgba16Array {
 //
 [[ group(2), binding(0) ]]
 var<storage, read_write> new_spectrogram_buffer: AtomicRgba16Array;
+
+// Minimal workgroup size requirement from WebGPU downlevel defaults
+//
+// Must be kept in sync with mod.rs since WebGPU does not allow setting
+// specialization constants yet.
+//
+// FIXME: Sync up workgroup length in workgroup_size attribute below
+let workgroup_len: u32 = 256u;
+let workgroup_len_p1: u32 = 257u;
 
 // Workgroup-local new spectrogram accumulator, can be in any rgba format and
 // for our purpose rgba16unorm will be most convenient.
@@ -55,7 +55,7 @@ fn load_input(pos: vec2<u32>) -> vec4<f32> {
         0
     );
     if (all(pos < old_spectrogram_dims)) {
-        return clamp(old_spectrogram_color, vec4<f32>(0.0), vec4<f32>(1.0));
+        return old_spectrogram_color;
     } else {
         return vec4<f32>(0.0);
     }
@@ -153,7 +153,7 @@ fn merge_accumulator(acc: vec4<f32>, out_pos: vec2<u32>) {
             let actual_old_u32 = atomicExchange(target, new_u32);
             if (actual_old_u32 == expected_old_u32) { break; }
 
-            // We accidentally overwrote another work-item's merging, must undo that
+            // We accidentally undid another work-item's merging, must undo that
             let actual_old = unpack2x16float(expected_old_u32);
             sub_acc = actual_old - expected_old;
             expected_old_u32 = actual_old_u32;

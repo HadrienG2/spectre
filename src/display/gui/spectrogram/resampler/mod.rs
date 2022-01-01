@@ -150,8 +150,8 @@ impl SpectrogramResampler {
         let downscale_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Spectrogram downscaling pipeline layout"),
             bind_group_layouts: &[
-                &texture_bind_group_layout,
                 &downscale_settings_bind_group_layout,
+                &texture_bind_group_layout,
                 &downscale_buffer_bind_group_layout,
             ],
             push_constant_ranges: &[],
@@ -303,8 +303,8 @@ impl SpectrogramResampler {
             let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("Downscaling compute pass"),
             });
-            compute_pass.set_bind_group(0, old_texture_bind_group, &[]);
-            compute_pass.set_bind_group(1, settings_bind_group, &[]);
+            compute_pass.set_bind_group(0, settings_bind_group, &[]);
+            compute_pass.set_bind_group(1, old_texture_bind_group, &[]);
             compute_pass.set_bind_group(2, &buffer_bind_group, &[]);
             compute_pass.set_pipeline(&self.downscale_pipeline);
             compute_pass.dispatch(

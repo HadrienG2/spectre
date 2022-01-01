@@ -1,4 +1,4 @@
-// Must be kept in sync with other shaders & main program
+// Must be kept in sync with the main program
 struct SettingsUniform {
     // Horizontal fraction of the window that is occupied by the live spectrum
     // TODO: Allow adjusting this with mouse controls (with <-> mouse cursor UX)
