@@ -38,8 +38,8 @@ struct AtomicRgba16Array {
 [[ group(2), binding(0) ]]
 var<storage, read_write> new_spectrogram_buffer: AtomicRgba16Array;
 
-// Workgroup-local new spectrogram accumulator, can be in any rgba16 format and
-// for our purpose rgba16uint will be most convenient.
+// Workgroup-local new spectrogram accumulator, can be in any rgba format and
+// for our purpose rgba16unorm will be most convenient.
 var<workgroup> new_spectrogram_accumulator: array<AtomicRgba16, workgroup_len_p1>;
 
 // Load input texel, clamp it to [0, 1], return a transparent texel if out of bounds
@@ -92,6 +92,13 @@ fn group_y_range(group_y: u32) -> array<u32, 2> {
 // Split a vec4<f32> into two consecutive vec2<f32>
 fn split_vec4(in: vec4<f32>) -> array<vec2<f32>, 2> {
     return array<vec2<f32>, 2>(in.rg, in.ba);
+}
+
+// Initialize the local spectrogram accumulator
+fn init_contribution(local_idx: u32) {
+    for (var i: i32 = 0; i < 2; i = i+1) {
+        atomicStore(&new_spectrogram_accumulator[local_idx].rg_ba[i], 0u);
+    }
 }
 
 // Integrate a contribution into a texel of the local spectrogram accumulator
@@ -184,6 +191,12 @@ fn downscale(
     [[ builtin(global_invocation_id) ]] global_id: vec3<u32>,
     [[ builtin(workgroup_id) ]] group_id: vec3<u32>,
 ) {
+    // Initialize this workgroup's contribution
+    init_contribution(local_idx);
+    if (local_idx == 0u) {
+        init_contribution(workgroup_len);
+    }
+
     // Determine and load input texel associated with this invocation
     let input_color = load_input(global_id.xy);
 
@@ -199,6 +212,9 @@ fn downscale(
     let local_y_start = out_y_start - f32(group_range[0]);
     let out_height = rel_texel_height();
     let local_y_end = local_y_start + out_height;
+
+    // Wait for accumulator initialization to be finished
+    workgroupBarrier();
 
     // Do these fall into the same texel or two consecutive texels?
     let first_idx = u32(local_y_start);
