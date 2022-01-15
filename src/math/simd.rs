@@ -184,13 +184,10 @@ mod tests {
             assert_le!(
                 (actual - expected).abs(),
                 tolerance * expected.abs(),
-                "Given input {:?} of length {}, actual result {} is not within \
-                 relative tolerance {} of expectation {}",
-                input,
-                input.len(),
-                actual,
-                tolerance,
-                expected
+                "Given input {input:?} of length {input_len}, \
+                 actual result {actual} is not within \
+                 relative tolerance {tolerance} of expectation {expected}",
+                input_len = input.len()
             );
         }
         TestResult::passed()

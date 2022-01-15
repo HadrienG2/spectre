@@ -82,8 +82,7 @@ impl ErrorOutput {
         let error = AudioError::from_u32(first_error);
         assert!(
             error.is_some(),
-            "Encountered unknown audio thread error code {}",
-            first_error
+            "Encountered unknown audio thread error code {first_error}"
         );
         error
     }

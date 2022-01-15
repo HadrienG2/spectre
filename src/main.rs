@@ -99,34 +99,41 @@ fn main() -> Result<()> {
 
     // Decode and validate CLI arguments
     let mut opts = CliOpts::from_args();
-    debug!("Got CLI options {:?}", opts);
-    if !opts.min_freq.is_finite() || opts.min_freq < 0.0 {
-        panic!("Please specify a sensible minimum frequency");
-    }
-    if !opts.max_freq.is_finite() || opts.max_freq <= opts.min_freq {
-        panic!("Please specify a sensible maximum frequency");
-    }
-    if !opts.freq_res.is_finite() || opts.freq_res <= 0.0 {
-        panic!("Please specify a sensible frequency resolution");
-    }
-    if !opts.time_res.is_finite() || opts.time_res <= 0.0 {
-        panic!("Please specify a sensible time resolution");
-    }
-    if !opts.amp_range.is_finite() {
-        panic!("Please specify a sensible amplitude scale");
-    }
-    #[cfg(all(feature = "gui", not(feature = "cli")))]
-    if !opts.spectrogram_refresh.is_finite() || opts.spectrogram_refresh <= 0.0 {
-        panic!("Please specify a sensible spectrogram refresh rate");
-    }
+    debug!("Got CLI options {opts:?}");
+    assert!(
+        opts.min_freq.is_finite() && opts.min_freq >= 0.0,
+        "Please specify a sensible minimum frequency"
+    );
+    assert!(
+        opts.max_freq.is_finite() && opts.max_freq > opts.min_freq,
+        "Please specify a sensible maximum frequency"
+    );
+    assert!(
+        opts.freq_res.is_finite() && opts.freq_res > 0.0,
+        "Please specify a sensible frequency resolution"
+    );
+    assert!(
+        opts.time_res.is_finite() && opts.time_res > 0.0,
+        "Please specify a sensible time resolution"
+    );
+    assert!(
+        opts.amp_range.is_finite(),
+        "Please specify a sensible amplitude scale"
+    );
     opts.amp_range = opts.amp_range.abs();
+    #[cfg(all(feature = "gui", not(feature = "cli")))]
+    assert!(
+        opts.spectrogram_refresh.is_finite() && opts.spectrogram_refresh > 0.0,
+        "Please specify a sensible spectrogram refresh rate"
+    );
 
     // Set up the audio stack
     let audio = AudioSetup::new()?;
     let sample_rate = audio.sample_rate();
-    if opts.max_freq > (sample_rate / 2) as f32 {
-        panic!("Requested max frequency can't be probed at current sampling rate");
-    }
+    assert!(
+        opts.max_freq <= (sample_rate / 2) as f32,
+        "Requested max frequency can't be probed at current sampling rate"
+    );
 
     // Set up the Fourier transform
     let mut fourier =
@@ -205,7 +212,7 @@ fn main() -> Result<()> {
             mut audio_error @ Err(_) => {
                 let terminal_reset_result = display.reset_terminal();
                 while let Err(error) = audio_error {
-                    error!("Audio thread error: {:?}", error);
+                    error!("Audio thread error: {error:?}");
                     audio_error = recording.read_history(fourier.input());
                 }
                 error!("Audio thread exited due to errors, time to die...");

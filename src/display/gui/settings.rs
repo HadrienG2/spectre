@@ -44,14 +44,14 @@ impl<T: AsStd140> SettingsUniform<T> {
 
         // Set up associated buffer
         let buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some(&format!("{} settings uniform", name)),
+            label: Some(&format!("{name} settings uniform")),
             contents: uniform.as_std140().as_bytes(),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
 
         // Set up associated bind group
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some(&format!("{} settings bind group layout", name)),
+            label: Some(&format!("{name} settings bind group layout")),
             entries: &[BindGroupLayoutEntry {
                 binding: 0,
                 visibility,
@@ -65,7 +65,7 @@ impl<T: AsStd140> SettingsUniform<T> {
         });
         //
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some(&format!("{} settings bind group", name)),
+            label: Some(&format!("{name} settings bind group")),
             layout: &bind_group_layout,
             entries: &[BindGroupEntry {
                 binding: 0,

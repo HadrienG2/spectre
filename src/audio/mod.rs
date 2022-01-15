@@ -22,7 +22,7 @@ impl AudioSetup {
         // Set up a JACK client
         let (jack_client, status) =
             jack::Client::new(env!("CARGO_PKG_NAME"), jack::ClientOptions::NO_START_SERVER)?;
-        log::debug!("Got jack client with status: {:?}", status);
+        log::debug!("Got jack client with status: {status:?}");
         Ok(Self(jack_client))
     }
 
@@ -162,10 +162,9 @@ impl ProcessHandler for ProcessState {
             use log::{error, info, warn};
             if size as usize > self.output_hist.capacity() {
                 error!(
-                    "New JACK buffer size {} is above history capacity {}. \
+                    "New JACK buffer size {size} is above history capacity {capacity}. \
                      Must reallocate history buffer!",
-                    size,
-                    self.output_hist.capacity()
+                    capacity = self.output_hist.capacity()
                 );
                 self.error_input
                     .notify_error(AudioError::MustReallocateHistory);
@@ -173,13 +172,12 @@ impl ProcessHandler for ProcessState {
             } else {
                 if size as usize > self.output_hist.capacity() / 4 {
                     warn!(
-                        "New JACK buffer size {} is more than 1/4 of history capacity {}. \
+                        "New JACK buffer size {size} is more than 1/4 of history capacity {capacity}. \
                          Overruns are likely to occur. Should reallocate history buffer!",
-                        size,
-                        self.output_hist.capacity()
+                        capacity = self.output_hist.capacity()
                     );
                 } else {
-                    info!("Switching to new supported JACK buffer size {}", size);
+                    info!("Switching to new supported JACK buffer size {size}");
                 }
                 Control::Continue
             }

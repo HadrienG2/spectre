@@ -166,7 +166,7 @@ impl GuiDisplay {
                         ) {
                             Ok(FrameResult::Continue) => {}
                             Ok(FrameResult::Stop) => *control_flow = ControlFlow::Exit,
-                            Err(e) => panic!("Frame processing failed: {}", e),
+                            Err(e) => panic!("Frame processing failed: {e}"),
                         }
                     }
 

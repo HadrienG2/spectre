@@ -58,18 +58,17 @@ impl SteadyQTransform {
             (samples_at_20khz / 4).next_power_of_two()
         };
         info!(
-            "At a sampling rate of {} Hz, achieving a time resolution of {} ms requires a {}-points FFT",
-            sample_rate,
-            time_res_at_20khz,
-            fft_len_at_20khz
+            "At a sampling rate of {sample_rate} Hz, \
+             achieving a time resolution of {time_res_at_20khz} ms \
+             requires a {fft_len_at_20khz}-points FFT"
         );
 
         // If the time resolution constraint is harsher than the frequency
         // resolution one, pick the FFT length accordingly.
         if fft_len_at_20khz > fft_len_at_20hz {
             info!(
-                "Can achieve desired time-frequency resolution compromise with a single {}-points FFT",
-                fft_len_at_20khz
+                "Can achieve desired time-frequency resolution compromise \
+                 with a single {fft_len_at_20khz}-points FFT"
             );
             fft_len_at_20hz = fft_len_at_20khz;
         }
@@ -84,8 +83,8 @@ impl SteadyQTransform {
         let num_ffts = (fft_len_at_20hz_pow2 - fft_len_at_20khz_pow2 + 1) as usize;
         assert!(
             num_ffts <= 11,
-            "Cannot achieve requested time-frequency resolution compromise ({} Hz at 20Hz, {} ms at 20kHz)",
-            freq_res_at_20hz, time_res_at_20khz
+            "Cannot achieve requested time-frequency resolution compromise \
+             ({freq_res_at_20hz} Hz at 20Hz, {time_res_at_20khz} ms at 20kHz)"
         );
 
         // Set up all the radix-2 FFTs required to approximate a constant-Q
@@ -98,9 +97,8 @@ impl SteadyQTransform {
         let center_right_len = 2usize.pow((fft_len_at_20hz_pow2 + fft_len_at_20khz_pow2) / 2);
         let mut pick_fft = |freq, len| {
             debug!(
-                "Will use a {}-points FFT at {} Hz",
-                len,
-                freq / inv_bin_width_at_20hz
+                "Will use a {len}-points FFT at {freq_hz} Hz",
+                freq_hz = freq / inv_bin_width_at_20hz
             );
             (
                 FourierTransform::from_fft(planner.plan_fft_forward(len), window),
@@ -330,10 +328,9 @@ impl FourierTransform {
         assert_ne!(sample_rate, 0);
         let fft_len = 2_usize.pow((sample_rate as f32 / resolution).log2().ceil() as _);
         info!(
-            "At a sampling rate of {} Hz, achieving the requested frequency resolution of {} Hz requires a {}-points FFT",
-            sample_rate,
-            resolution,
-            fft_len
+            "At a sampling rate of {sample_rate} Hz, \
+             achieving the requested frequency resolution of {resolution} Hz \
+             requires a {fft_len}-points FFT"
         );
         fft_len
     }
@@ -390,7 +387,7 @@ impl FourierTransform {
                     a0 - a1 * (phase).cos() + a2 * (2.0 * phase).cos() - a3 * (3.0 * phase).cos()
                 })
                 .collect(),
-            _ => panic!("Window type {} is not supported", window),
+            _ => panic!("Window type {window} is not supported"),
         };
 
         // Pre-normalize the window function so that output is normalized

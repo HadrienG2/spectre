@@ -67,11 +67,10 @@ impl CoreContext {
         let inner_size = window.inner_size();
         let scale_factor = window.scale_factor() as f32;
         info!(
-            "Built window with id {:?}, inner physical size {}x{}, DPI scale factor {}",
-            window.id(),
-            inner_size.width,
-            inner_size.height,
-            scale_factor
+            "Built window with id {id:?}, inner physical size {width}x{height}, DPI scale factor {scale_factor}",
+            id = window.id(),
+            width = inner_size.width,
+            height = inner_size.height,
         );
 
         // Initialize WebGPU adapter and presentation surface
@@ -91,11 +90,10 @@ impl CoreContext {
         } else if adapter_features.contains(Features::all_webgpu_mask()) {
             let native_features = adapter_features.difference(Features::all_webgpu_mask());
             info!(
-                "Adapter supports all standard WebGPU features and also native features {:?}",
-                native_features
+                "Adapter supports all standard WebGPU features and also native features {native_features:?}",
             );
         } else {
-            info!("Adapter supports WebGPU features {:?}", adapter.features());
+            info!("Adapter supports WebGPU features {adapter_features:?}");
         }
         debug!(
             "In other words, it does NOT support WebGPU features {:?}",
@@ -130,9 +128,8 @@ impl CoreContext {
             .get_preferred_format(&adapter)
             .expect("By the above constraint, the surface should be compatible with the adapter");
         info!(
-            "Got surface with preferred format {:?} and associated features {:?}",
-            preferred_surface_format,
-            adapter.get_texture_format_features(preferred_surface_format),
+            "Got surface with preferred format {preferred_surface_format:?} and associated features {features:?}",
+            features = adapter.get_texture_format_features(preferred_surface_format),
         );
 
         // Define minimal device requirements
@@ -151,7 +148,7 @@ impl CoreContext {
                 }
             }
         }
-        debug!("Want a device that goes up to {:#?}", limits);
+        debug!("Want a device that goes up to {limits:#?}");
 
         // Configure device and queue
         let (device, queue) = pollster::block_on(adapter.request_device(
@@ -239,7 +236,7 @@ impl CoreContext {
                     //
                     ref event @ WindowEvent::KeyboardInput { ref input, .. } => {
                         if input.state != ElementState::Pressed {
-                            trace!("Unhandled non-press keyboard event : {:?}", event);
+                            trace!("Unhandled non-press keyboard event : {event:?}");
                             return None;
                         }
                         match input.virtual_keycode {
@@ -247,7 +244,7 @@ impl CoreContext {
                                 *control_flow = ControlFlow::Exit;
                             }
                             _ => {
-                                trace!("Unhandled key-press event : {:?}", event);
+                                trace!("Unhandled key-press event : {event:?}");
                             }
                         }
                         None
@@ -284,7 +281,7 @@ impl CoreContext {
 
                     // Log other events we don't handle yet
                     _ => {
-                        trace!("Unhandled window event: {:?}", event);
+                        trace!("Unhandled window event: {event:?}");
                         None
                     }
                 }
@@ -308,7 +305,7 @@ impl CoreContext {
 
             // Log other events we don't handle yet
             _ => {
-                trace!("Unhandled winit event: {:?}", event);
+                trace!("Unhandled winit event: {event:?}");
                 None
             }
         }
