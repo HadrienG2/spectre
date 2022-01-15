@@ -90,7 +90,8 @@ impl CoreContext {
         } else if adapter_features.contains(Features::all_webgpu_mask()) {
             let native_features = adapter_features.difference(Features::all_webgpu_mask());
             info!(
-                "Adapter supports all standard WebGPU features and also native features {native_features:?}",
+                "Adapter supports all standard WebGPU features \
+                 and also native features {native_features:?}",
             );
         } else {
             info!("Adapter supports WebGPU features {adapter_features:?}");
@@ -128,7 +129,8 @@ impl CoreContext {
             .get_preferred_format(&adapter)
             .expect("By the above constraint, the surface should be compatible with the adapter");
         info!(
-            "Got surface with preferred format {preferred_surface_format:?} and associated features {features:?}",
+            "Got surface with preferred format {preferred_surface_format:?} \
+             and associated features {features:?}",
             features = adapter.get_texture_format_features(preferred_surface_format),
         );
 

@@ -155,8 +155,7 @@ impl CliDisplay {
         stdout.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
         write!(
             stdout,
-            "Audio thread overwrote {} samples during readout!",
-            excess_samples,
+            "Audio thread overwrote {excess_samples} samples during readout!"
         )?;
         stdout.flush()?;
         Ok(())
